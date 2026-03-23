@@ -207,4 +207,81 @@ adminApp.post('/update-gb-api', authenticateAPI, async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Database Error" }); }
 });
 
+// ==========================================
+// 🌟 1. MASTER မှ SERVER အသစ် ထပ်ထည့်သောအခါ လက်ခံမည့် API
+// ==========================================
+adminApp.post('/sync-new-server', authenticateAPI, async (req, res) => {
+    try {
+        const { masterGroupId, newServerName, userKeys } = req.body;
+        
+        if (!masterGroupId || !newServerName || !userKeys) {
+            return res.status(400).json({ error: "လိုအပ်သော Data များ မပြည့်စုံပါ။" });
+        }
+
+        // userKeys ထဲတွင် ပါလာသော User တစ်ယောက်ချင်းစီ၏ Token ကို ပတ်၍ Update လုပ်မည်
+        for (const [token, newOutlineKey] of Object.entries(userKeys)) {
+            const user = await User.findOne({ token: token });
+            
+            if (user) {
+                // ရှိပြီးသား Key များထဲသို့ ဆာဗာသစ်နှင့် Key အသစ်ကို ပေါင်းထည့်မည်
+                user.accessKeys = {
+                    ...user.accessKeys,
+                    [newServerName]: newOutlineKey
+                };
+                
+                // Mongoose တွင် Object အသစ်ပြောင်းကြောင်း သိစေရန်
+                user.markModified('accessKeys'); 
+                await user.save();
+                
+                // User ရဲ့ Cache ကို ရှင်းမည် (ချက်ချင်း Update ဖြစ်စေရန်)
+                await redisClient.del(token); 
+            }
+        }
+
+        res.json({ success: true, message: `Server အသစ် ${newServerName} အား User များထံ ထည့်သွင်းပြီးပါပြီ။` });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Server Error during sync-new-server" });
+    }
+});
+
+// ==========================================
+// 🌟 2. GB UPDATE လက်ခံခြင်း & GB ပြည့်သွားလျှင် MASTER သို့ လှမ်းပိတ်ခိုင်းခြင်း
+// ==========================================
+adminApp.post('/update-gb-api', authenticateAPI, async (req, res) => {
+    try {
+        const { token, usedGB } = req.body;
+        if (!token || usedGB === undefined) return res.status(400).json({ error: "Required fields missing" });
+
+        const user = await User.findOne({ token: token });
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        user.usedGB = Number(usedGB);
+        await user.save();
+
+        // 🚨 GB လစ်မစ် ပြည့်သွားခြင်း သို့မဟုတ် ကျော်သွားခြင်း စစ်ဆေးရန်
+        if (user.usedGB >= user.totalGB) {
+            console.log(`⚠️ User ${user.name} ၏ Data ပြည့်သွားပါပြီ။ Master သို့ ပိတ်ရန် အကြောင်းကြားနေပါသည်။`);
+            
+            try {
+                // Master Panel ဆီသို့ လှမ်းပိတ်ခိုင်းမည် (Webhook)
+                const masterActionUrl = 'http://178.128.55.202:8888/api/user-action';
+                await axios.post(masterActionUrl, {
+                    token: token,
+                    action: "suspend" // ပိတ်ခိုင်းခြင်း
+                }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
+                
+                console.log("✅ Master တွင် Key များ ပိတ်ပြီးပါပြီ။");
+            } catch (err) {
+                console.error("❌ Master သို့ ပိတ်ရန် အကြောင်းကြား၍ မရပါ။", err.message);
+            }
+        }
+
+        res.json({ success: true, message: "GB updated successfully" });
+    } catch (error) { 
+        res.status(500).json({ error: "Database Error" }); 
+    }
+});
+
 module.exports = adminApp;
