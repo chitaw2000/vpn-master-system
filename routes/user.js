@@ -1,24 +1,30 @@
 const express = require('express');
-const axios = require('axios');
 const userApp = express.Router();
 const redisClient = require('../config/redis');
 const User = require('../models/User');
-const Server = require('../models/Server');
 require('dotenv').config();
 
+// ==========================================
+// 1. USER WEB PANEL (UI)
+// ==========================================
 userApp.get('/panel/:token', async (req, res) => {
     try {
         const token = req.params.token;
         const user = await User.findOne({ token: token });
-        if(!user) return res.status(404).send("User not found or Invalid Token!");
+        
+        if(!user) {
+            return res.status(404).send("User not found or Invalid Token!");
+        }
 
-        const availableServers = await Server.find({ groupName: user.groupName });
+        // 🌟 အရေးကြီး: User ပိုင်ဆိုင်သော Key (၅) ခုကိုသာ Dropdown တွင် ပြမည်
         let dropdownOptions = `<optgroup label="${user.groupName}">`;
         
-        availableServers.forEach(s => {
-            const isSelected = user.currentServer === s.serverName ? 'selected' : '';
-            dropdownOptions += `<option value="${s.serverName}" ${isSelected}>${s.serverName}</option>`;
-        });
+        if (user.accessKeys) {
+            Object.keys(user.accessKeys).forEach(serverName => {
+                const isSelected = user.currentServer === serverName ? 'selected' : '';
+                dropdownOptions += `<option value="${serverName}" ${isSelected}>${serverName}</option>`;
+            });
+        }
         dropdownOptions += `</optgroup>`;
 
         const ssconfLink = `ssconf://${req.get('host')}/${token}.json#VPN-${encodeURIComponent(user.name.replace(/\s+/g, ''))}`;
@@ -51,70 +57,103 @@ userApp.get('/panel/:token', async (req, res) => {
                         <div class="w-full bg-gray-200 rounded-full h-2">
                             <div class="bg-indigo-500 h-2 rounded-full" style="width: ${(user.usedGB / user.totalGB) * 100}%"></div>
                         </div>
+                        <p class="text-xs text-center text-red-500 font-bold mt-3"><i class="far fa-clock"></i> Expire: ${user.expireDate}</p>
                     </div>
 
                     <form action="/panel/change-server" method="POST">
                         <input type="hidden" name="token" value="${token}">
                         <label class="block text-sm font-bold text-gray-700 mb-2">Switch Location</label>
-                        <select name="newServer" class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <select name="newServer" class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 outline-none font-semibold text-gray-700">
                             ${dropdownOptions}
                         </select>
                         <button type="submit" class="w-full bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-lg shadow transition">Switch Now</button>
                     </form>
                 </div>
+                
                 <script>
                     function copyLink(link) {
                         var tempInput = document.createElement("input"); 
                         tempInput.value = link; 
                         document.body.appendChild(tempInput); 
                         tempInput.select(); 
-                        document.execCommand("copy"); 
+                        tempInput.setSelectionRange(0, 99999);
+                        
+                        try {
+                            document.execCommand("copy"); 
+                            var btn = document.getElementById('copyBtn'); 
+                            btn.innerHTML = '<i class="fas fa-check-circle mr-3 text-xl"></i> LINK COPIED!'; 
+                            btn.classList.replace('bg-green-500', 'bg-teal-600');
+                            
+                            setTimeout(() => { 
+                                btn.innerHTML = '<i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK'; 
+                                btn.classList.replace('bg-teal-600', 'bg-green-500'); 
+                            }, 3000);
+                        } catch(err) {
+                            alert("Copy ကူးရာတွင် အဆင်မပြေပါ။");
+                        }
+                        
                         document.body.removeChild(tempInput);
-                        
-                        var btn = document.getElementById('copyBtn'); 
-                        btn.innerHTML = '<i class="fas fa-check-circle mr-3 text-xl"></i> LINK COPIED!'; 
-                        btn.classList.replace('bg-green-500', 'bg-teal-600');
-                        
-                        setTimeout(() => { 
-                            btn.innerHTML = '<i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK'; 
-                            btn.classList.replace('bg-teal-600', 'bg-green-500'); 
-                        }, 3000);
                     }
                 </script>
             </body>
             </html>
         `);
-    } catch (error) { res.status(500).send("System Error"); }
+    } catch (error) { 
+        res.status(500).send("System Error"); 
+    }
 });
 
+// ==========================================
+// 2. CHANGE SERVER API (Direct Update)
+// ==========================================
 userApp.post('/panel/change-server', async (req, res) => {
     const { token, newServer } = req.body;
     try {
-        await axios.post(`http://127.0.0.1:${process.env.ADMIN_PORT}/api/internal/change-server`, { token, newServer }, { headers: { 'x-api-key': process.env.SECRET_API_KEY } });
-        await redisClient.del(token);
+        const user = await User.findOne({ token: token });
+        
+        // User မှာ အဲ့ဒီ Server အမှန်တကယ် ရှိ/မရှိ စစ်ဆေးမည်
+        if (user && user.accessKeys && user.accessKeys[newServer]) {
+            user.currentServer = newServer;
+            await user.save(); // Database တွင် တိုက်ရိုက် Update လုပ်မည်
+            
+            // Redis (Cache) ထဲမှ Key အဟောင်းကို ဖျက်မည်
+            await redisClient.del(token);
+        }
         res.redirect('/panel/' + token);
-    } catch (error) { res.status(500).send("Error"); }
+    } catch (error) { 
+        res.status(500).send("Error changing server"); 
+    }
 });
 
-// 🌟 Outline App ဖတ်ရန် သီးသန့် JSON API (Format အတိအကျ)
-// ... (အပေါ်ပိုင်းက Code တွေ အတူတူပါပဲ)
-
-userApp.get('/panel/:token', async (req, res) => {
+// ==========================================
+// 3. OUTLINE APP JSON ENDPOINT
+// ==========================================
+userApp.get('/:token.json', async (req, res) => {
+    const token = req.params.token;
     try {
-        const token = req.params.token;
-        const user = await User.findOne({ token: token });
-        if(!user) return res.status(404).send("User not found or Invalid Token!");
-
-        // 🌟 အရေးကြီး - User ပိုင်ဆိုင်သော Key များကိုသာ Dropdown တွင် ပြမည်
-        let dropdownOptions = `<optgroup label="${user.groupName}">`;
-        
-        // keys = {"SG-1": "ss://...", "JP-1": "ss://..."}
-        if (user.accessKeys) {
-            Object.keys(user.accessKeys).forEach(serverName => {
-                const isSelected = user.currentServer === serverName ? 'selected' : '';
-                dropdownOptions += `<option value="${serverName}" ${isSelected}>${serverName}</option>`;
-            });
+        // ၁။ Cache ထဲမှာ ရှိမရှိ အရင်စစ်မည် (မြန်ဆန်စေရန်)
+        const cachedKey = await redisClient.get(token);
+        if (cachedKey) {
+            return res.json({ server: cachedKey }); 
         }
-        dropdownOptions += `</optgroup>`;
+        
+        // ၂။ Cache မရှိလျှင် Database မှ သွားယူမည်
+        const user = await User.findOne({ token: token });
+        
+        if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
+            const outlineKey = user.accessKeys[user.currentServer];
+            
+            // နောက်တစ်ခါ မြန်အောင် Cache (Redis) ထဲမှာ ၅ မိနစ် (300 စက္ကန့်) သိမ်းထားမည်
+            await redisClient.setEx(token, 300, outlineKey);
+            
+            // Outline App သို့ JSON Format ဖြင့် ပြန်ပေးမည်
+            return res.json({ server: outlineKey });
+        }
+        
+        res.status(404).json({ error: "Configuration Not Found" });
+    } catch (error) { 
+        res.status(500).json({ error: "System Error" }); 
+    }
+});
 
-        // ... (HTML ပြမည့် အပိုင်းသည် ယခင်အတိုင်း အတူတူပါပဲ) ...
+module.exports = userApp;
