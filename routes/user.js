@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios'); // API လှမ်းခေါ်ရန်
 const userApp = express.Router();
 const redisClient = require('../config/redis');
 const User = require('../models/User');
@@ -16,7 +17,7 @@ userApp.get('/panel/:token', async (req, res) => {
             return res.status(404).send("User not found or Invalid Token!");
         }
 
-        // 🌟 အရေးကြီး: User ပိုင်ဆိုင်သော Key (၅) ခုကိုသာ Dropdown တွင် ပြမည်
+        // User ပိုင်ဆိုင်သော Key (၅) ခုကို Dropdown တွင် ပြမည်
         let dropdownOptions = `<optgroup label="${user.groupName}">`;
         
         if (user.accessKeys) {
@@ -104,22 +105,40 @@ userApp.get('/panel/:token', async (req, res) => {
 });
 
 // ==========================================
-// 2. CHANGE SERVER API (Direct Update)
+// 2. CHANGE SERVER API & WEBHOOK
 // ==========================================
 userApp.post('/panel/change-server', async (req, res) => {
     const { token, newServer } = req.body;
     try {
         const user = await User.findOne({ token: token });
         
-        // User မှာ အဲ့ဒီ Server အမှန်တကယ် ရှိ/မရှိ စစ်ဆေးမည်
         if (user && user.accessKeys && user.accessKeys[newServer]) {
+            // ၁။ ကျနော်တို့ Database ကို အရင် Update လုပ်မည်
             user.currentServer = newServer;
-            await user.save(); // Database တွင် တိုက်ရိုက် Update လုပ်မည်
+            await user.save(); 
             
-            // Redis (Cache) ထဲမှ Key အဟောင်းကို ဖျက်မည်
+            // ၂။ Cache အဟောင်းကို ဖျက်မည်
             await redisClient.del(token);
+
+            // 🌟 ၃။ MASTER PANEL သို့ WEBHOOK လှမ်းပို့မည့် အပိုင်း 🌟
+            try {
+                const masterWebhookUrl = 'http://178.128.55.202:8888/api/webhook/switch'; 
+                
+                await axios.post(masterWebhookUrl, {
+                    token: token,
+                    activeServer: newServer
+                });
+                console.log(`✅ Webhook Sent: User ${token} switched to ${newServer}`);
+                
+            } catch (webhookError) {
+                // ဟိုဘက်ဆာဗာ ပိတ်နေရင်တောင် ကျနော်တို့ဘက်က User Error မတက်အောင် catch ဖမ်းထားပါသည်
+                console.error("❌ Webhook Failed to send:", webhookError.message);
+            }
         }
+        
+        // ၄။ အားလုံးပြီးလျှင် User ကို Panel ဆီ ပြန်ပို့မည်
         res.redirect('/panel/' + token);
+        
     } catch (error) { 
         res.status(500).send("Error changing server"); 
     }
@@ -131,22 +150,16 @@ userApp.post('/panel/change-server', async (req, res) => {
 userApp.get('/:token.json', async (req, res) => {
     const token = req.params.token;
     try {
-        // ၁။ Cache ထဲမှာ ရှိမရှိ အရင်စစ်မည် (မြန်ဆန်စေရန်)
         const cachedKey = await redisClient.get(token);
         if (cachedKey) {
             return res.json({ server: cachedKey }); 
         }
         
-        // ၂။ Cache မရှိလျှင် Database မှ သွားယူမည်
         const user = await User.findOne({ token: token });
         
         if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
             const outlineKey = user.accessKeys[user.currentServer];
-            
-            // နောက်တစ်ခါ မြန်အောင် Cache (Redis) ထဲမှာ ၅ မိနစ် (300 စက္ကန့်) သိမ်းထားမည်
             await redisClient.setEx(token, 300, outlineKey);
-            
-            // Outline App သို့ JSON Format ဖြင့် ပြန်ပေးမည်
             return res.json({ server: outlineKey });
         }
         
