@@ -78,6 +78,7 @@ adminApp.get('/group/:name', async (req, res) => {
 
     let usersHtml = '';
     users.forEach((u, index) => {
+        // SSConf Link တည်ဆောက်ခြင်း
         const link = `ssconf://${process.env.VPS_IP}:${process.env.USER_PORT}/${u.token}.json#VPN-${u.name.replace(/\s+/g, '')}`;
         usersHtml += `
         <tr class="border-b hover:bg-gray-50">
@@ -87,7 +88,7 @@ adminApp.get('/group/:name', async (req, res) => {
             <td class="p-4 text-sm text-red-500 font-semibold"><i class="far fa-clock mr-1"></i>${u.expireDate}</td>
             <td class="p-4"><div class="text-sm font-bold text-gray-700">${u.usedGB} / ${u.totalGB} GB</div></td>
             <td class="p-4 text-right">
-                <button onclick="copyLink('${link}')" class="bg-gray-800 text-white hover:bg-black px-4 py-2 rounded-lg text-xs font-bold transition shadow">
+                <button id="btn-${u.token}" onclick="copyLink('${link}', 'btn-${u.token}')" class="bg-gray-800 text-white hover:bg-black px-4 py-2 rounded-lg text-xs font-bold transition shadow">
                     <i class="fas fa-copy mr-1"></i> Copy SSConf
                 </button>
             </td>
@@ -144,9 +145,37 @@ adminApp.get('/group/:name', async (req, res) => {
                     </div>
                 </div>
             </div>
+
             <script>
-                function copyLink(link) {
-                    navigator.clipboard.writeText(link).then(() => { alert("✅ SSConf Link Copied Successfully!"); }).catch(() => { alert("Failed to copy link."); });
+                function copyLink(link, btnId) {
+                    var tempInput = document.createElement("input");
+                    tempInput.value = link;
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    tempInput.setSelectionRange(0, 99999); // Mobile များအတွက်
+                    
+                    try {
+                        document.execCommand("copy");
+                        
+                        // ခလုတ်ကို Copied! ဟု ပြောင်းပြခြင်း
+                        var btn = document.getElementById(btnId);
+                        var originalText = btn.innerHTML;
+                        btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                        btn.classList.replace('bg-gray-800', 'bg-green-600');
+                        btn.classList.replace('hover:bg-black', 'hover:bg-green-700');
+                        
+                        // ၃ စက္ကန့်နေရင် နဂိုအတိုင်း ပြန်ပြောင်းမည်
+                        setTimeout(function() {
+                            btn.innerHTML = originalText;
+                            btn.classList.replace('bg-green-600', 'bg-gray-800');
+                            btn.classList.replace('hover:bg-green-700', 'hover:bg-black');
+                        }, 3000);
+                        
+                    } catch (err) {
+                        alert("Copy ကူးရာတွင် အဆင်မပြေပါ။ ဖုန်း Version ကြောင့်ဖြစ်နိုင်ပါသည်။");
+                    }
+                    
+                    document.body.removeChild(tempInput);
                 }
             </script>
         </body></html>
@@ -165,7 +194,6 @@ adminApp.post('/add-server', async (req, res) => {
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, token, totalGB, expireDate } = req.body;
-        // Group ထဲက ပထမဆုံး Server ကို အလိုအလျောက် ချိတ်ပေးမည် (User Form တွင် Server ရွေးစရာမလိုအောင် ရှင်းထုတ်ထားသည်)
         const firstServer = await Server.findOne({ groupName: groupName });
         const defaultServer = firstServer ? firstServer.serverName : "None";
 
