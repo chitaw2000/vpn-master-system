@@ -86,21 +86,35 @@ userApp.post('/panel/change-server', async (req, res) => {
 // ==========================================
 // 3. OUTLINE APP JSON ENDPOINT
 // ==========================================
+// ==========================================
+// 3. OUTLINE APP JSON ENDPOINT (Raw JSON Format ပြန်ပေးမည်)
+// ==========================================
 userApp.get('/:token.json', async (req, res) => {
     const token = req.params.token;
     try {
+        // 1. Redis Cache ထဲမှာ ရှိမရှိ စစ်မည်
         const cachedKey = await redisClient.get(token);
-        if (cachedKey) return res.json({ server: cachedKey }); 
-        
-        const user = await User.findOne({ token: token });
-        if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
-            const outlineKey = user.accessKeys[user.currentServer];
-            await redisClient.setEx(token, 300, outlineKey);
-            return res.json({ server: outlineKey });
+        if (cachedKey) {
+            // Redis ထဲမှာ String အနေနဲ့ သိမ်းထားလို့ JSON အဖြစ် ပြန်ပြောင်းပြီး ပို့မည်
+            return res.json(JSON.parse(cachedKey)); 
         }
+        
+        // 2. Cache ထဲမရှိလျှင် Database ထဲ သွားရှာမည်
+        const user = await User.findOne({ token: token });
+        
+        if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
+            // Master Panel မှ ပို့ထားသော JSON Object အစစ်
+            const rawConfigObject = user.accessKeys[user.currentServer];
+            
+            // Redis ထဲသို့ String အနေဖြင့် ၅ မိနစ် သိမ်းမည်
+            await redisClient.setEx(token, 300, JSON.stringify(rawConfigObject));
+            
+            // App ထဲသို့ JSON Object အစိမ်းအတိုင်း တိုက်ရိုက် ပြန်ပေးမည်
+            return res.json(rawConfigObject);
+        }
+        
         res.status(404).json({ error: "Configuration Not Found" });
-    } catch (error) { res.status(500).json({ error: "System Error" }); }
+    } catch (error) { 
+        res.status(500).json({ error: "System Error" }); 
+    }
 });
-
-// မဖြစ်မနေ လိုအပ်သော အောက်ဆုံးလိုင်း (EXPORTS)
-module.exports = userApp;
