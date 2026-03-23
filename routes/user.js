@@ -1,8 +1,9 @@
 const express = require('express');
 const axios = require('axios');
-const userApp = express.Router(); // 🌟 ဒီစာကြောင်း ပျောက်သွားလို့ Error တက်တာပါ
+const userApp = express.Router();
 const redisClient = require('../config/redis');
 const User = require('../models/User');
+const Group = require('../models/Group'); // 🌟 Group Data ယူရန် ထည့်ထားပါသည်
 require('dotenv').config();
 
 // ==========================================
@@ -12,8 +13,11 @@ userApp.get('/panel/:token', async (req, res) => {
     try {
         const token = req.params.token;
         const user = await User.findOne({ token: token });
-        
         if(!user) return res.status(404).send("User not found or Invalid Token!");
+
+        // 🌟 User ရဲ့ Group ကို ရှာပြီး NS Record ကို ယူမည်
+        const group = await Group.findOne({ name: user.groupName });
+        const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
 
         let dropdownOptions = `<optgroup label="${user.groupName}">`;
         if (user.accessKeys && Object.keys(user.accessKeys).length > 0) {
@@ -26,7 +30,8 @@ userApp.get('/panel/:token', async (req, res) => {
         }
         dropdownOptions += `</optgroup>`;
 
-        const ssconfLink = `ssconf://${req.get('host')}/${token}.json#VPN-${encodeURIComponent(user.name.replace(/\s+/g, ''))}`;
+        // 🌟 Group ရဲ့ ကိုယ်ပိုင် NS Record နှင့် လင့်ခ်တည်ဆောက်မည်
+        const ssconfLink = `ssconf://${domainName}/${token}.json#VPN-${encodeURIComponent(user.name.replace(/\s+/g, ''))}`;
 
         res.send(`
             <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
@@ -84,9 +89,6 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // ==========================================
-// 3. OUTLINE APP JSON ENDPOINT (Robust Handling)
-// ==========================================
-// ==========================================
 // 3. OUTLINE APP JSON ENDPOINT (Exact Format Ordering)
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
@@ -102,30 +104,26 @@ userApp.get('/:token.json', async (req, res) => {
         if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
             let rawConfig = user.accessKeys[user.currentServer];
             
-            // String အနေနဲ့ ဝင်လာရင် Object အဖြစ် ပြောင်းမည်
             if (typeof rawConfig === 'string' && rawConfig.startsWith('{')) {
                 try { rawConfig = JSON.parse(rawConfig); } catch(e){}
             }
             
-            // ss:// အဟောင်းတွေအတွက်
             if (typeof rawConfig === 'string' && rawConfig.startsWith('ss://')) {
                 const fallbackFormat = { server: rawConfig };
                 await redisClient.setEx(token, 300, JSON.stringify(fallbackFormat));
                 return res.json(fallbackFormat);
             }
 
-            // 🌟 ဤနေရာသည် အရေးကြီးဆုံးဖြစ်သည် (လိုချင်သော Format အတိအကျ ပြန်စီခြင်း) 🌟
             if (typeof rawConfig === 'object' && rawConfig.server) {
                 rawConfig = {
                     server: rawConfig.server,
-                    server_port: Number(rawConfig.server_port), // Port သည် ဂဏန်းဖြစ်ရမည်
+                    server_port: Number(rawConfig.server_port), 
                     password: rawConfig.password,
                     method: rawConfig.method,
                     prefix: rawConfig.prefix || ""
                 };
             }
 
-            // ပြန်စီထားသော Data ကို Cache ထဲသိမ်းပြီး App သို့ ပြန်ပို့မည်
             await redisClient.setEx(token, 300, JSON.stringify(rawConfig));
             return res.json(rawConfig);
         }
@@ -135,4 +133,5 @@ userApp.get('/:token.json', async (req, res) => {
         res.status(500).json({ error: "System Error" }); 
     }
 });
+
 module.exports = userApp;
