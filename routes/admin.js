@@ -205,7 +205,7 @@ adminApp.post('/add-user', async (req, res) => {
 });
 
 // Internal APIs for User Panel
-adminApp.post('/api/internal/get-server', authenticateAPI, async (req, res) => {
+adminApp.post('/get-server', authenticateAPI, async (req, res) => {
     const user = await User.findOne({token: req.body.token});
     if (user) {
         const server = await Server.findOne({serverName: user.currentServer});
@@ -214,7 +214,7 @@ adminApp.post('/api/internal/get-server', authenticateAPI, async (req, res) => {
     res.status(404).json({ error: "Not found" });
 });
 
-adminApp.post('/api/internal/change-server', authenticateAPI, async (req, res) => {
+adminApp.post('/change-server', authenticateAPI, async (req, res) => {
     const { token, newServer } = req.body;
     const s = await Server.findOne({serverName: newServer});
     if (s) {
