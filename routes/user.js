@@ -86,6 +86,9 @@ userApp.post('/panel/change-server', async (req, res) => {
 // ==========================================
 // 3. OUTLINE APP JSON ENDPOINT (Robust Handling)
 // ==========================================
+// ==========================================
+// 3. OUTLINE APP JSON ENDPOINT (Exact Format Ordering)
+// ==========================================
 userApp.get('/:token.json', async (req, res) => {
     const token = req.params.token;
     try {
@@ -99,16 +102,30 @@ userApp.get('/:token.json', async (req, res) => {
         if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
             let rawConfig = user.accessKeys[user.currentServer];
             
+            // String အနေနဲ့ ဝင်လာရင် Object အဖြစ် ပြောင်းမည်
             if (typeof rawConfig === 'string' && rawConfig.startsWith('{')) {
                 try { rawConfig = JSON.parse(rawConfig); } catch(e){}
             }
             
+            // ss:// အဟောင်းတွေအတွက်
             if (typeof rawConfig === 'string' && rawConfig.startsWith('ss://')) {
                 const fallbackFormat = { server: rawConfig };
                 await redisClient.setEx(token, 300, JSON.stringify(fallbackFormat));
                 return res.json(fallbackFormat);
             }
 
+            // 🌟 ဤနေရာသည် အရေးကြီးဆုံးဖြစ်သည် (လိုချင်သော Format အတိအကျ ပြန်စီခြင်း) 🌟
+            if (typeof rawConfig === 'object' && rawConfig.server) {
+                rawConfig = {
+                    server: rawConfig.server,
+                    server_port: Number(rawConfig.server_port), // Port သည် ဂဏန်းဖြစ်ရမည်
+                    password: rawConfig.password,
+                    method: rawConfig.method,
+                    prefix: rawConfig.prefix || ""
+                };
+            }
+
+            // ပြန်စီထားသော Data ကို Cache ထဲသိမ်းပြီး App သို့ ပြန်ပို့မည်
             await redisClient.setEx(token, 300, JSON.stringify(rawConfig));
             return res.json(rawConfig);
         }
@@ -118,6 +135,4 @@ userApp.get('/:token.json', async (req, res) => {
         res.status(500).json({ error: "System Error" }); 
     }
 });
-
-// မဖြစ်မနေ လိုအပ်သော အောက်ဆုံးလိုင်း (EXPORTS)
 module.exports = userApp;
