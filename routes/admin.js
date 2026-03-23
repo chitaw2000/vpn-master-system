@@ -308,24 +308,46 @@ adminApp.post('/change-server', authenticateAPI, async (req, res) => {
 });
 
 // 🌟 တခြား Admin Panel (သို့) Bot မှ API ဖြင့် Server ထည့်ရန် လမ်းကြောင်းသစ် 🌟
-adminApp.post('/add-server-api', authenticateAPI, async (req, res) => {
+// routes/admin.js ထဲတွင် ထည့်ရန်
+adminApp.post('/sync-user-api', authenticateAPI, async (req, res) => {
     try {
-        const { groupName, serverName, serverKey } = req.body;
+        // Master Panel မှ လှမ်းပို့မည့် အချက်အလက်များ
+        const { name, groupName, totalGB, expireDate, keys } = req.body;
         
-        if (!groupName || !serverName || !serverKey) {
-            return res.status(400).json({ error: "Group Name, Server Name နှင့် Server Key အားလုံး ထည့်ပေးရန် လိုအပ်ပါသည်။" });
+        if (!name || !keys || Object.keys(keys).length === 0) {
+            return res.status(400).json({ error: "Missing required fields or keys." });
         }
 
-        const groupExists = await Group.findOne({ name: groupName });
-        if (!groupExists) {
-            await Group.create({ name: groupName });
-        }
+        // Random Token အသစ်ထုတ်မည်
+        const token = crypto.randomBytes(16).toString('hex'); 
+        
+        // ပို့လိုက်သော Key ၅ ခုထဲမှ ပထမဆုံး Server နာမည်ကို default အဖြစ်ထားမည်
+        const availableServers = Object.keys(keys);
+        const defaultServer = availableServers[0];
 
-        await Server.create({ groupName, serverName, serverKey });
-        res.json({ success: true, message: `Server ${serverName} အား ${groupName} သို့ အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ။` });
-    } catch (error) { 
-        res.status(500).json({ error: "Database Error" }); 
+        // Database သို့ သိမ်းမည်
+        await User.create({
+            name,
+            token,
+            groupName,
+            totalGB: Number(totalGB),
+            usedGB: 0,
+            currentServer: defaultServer,
+            expireDate,
+            accessKeys: keys // Key ၅ ကြောင်းလုံးကို သိမ်းလိုက်ပါပြီ
+        });
+
+        // Master Panel ဆီသို့ SSConf Link ပြန်ပို့ပေးမည်
+        const ssconfLink = `ssconf://${process.env.VPS_IP}:${process.env.USER_PORT}/${token}.json#VPN-${encodeURIComponent(name.replace(/\s+/g, ''))}`;
+        
+        res.json({ 
+            success: true, 
+            message: "User and 5 Keys synced successfully",
+            token: token,
+            ssconf_link: ssconfLink
+        });
+
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
     }
 });
-
-module.exports = adminApp;
