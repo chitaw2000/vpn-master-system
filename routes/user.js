@@ -1,5 +1,5 @@
 const express = require('express');
-const axios = require('axios'); // API လှမ်းခေါ်ရန်
+const axios = require('axios');
 const userApp = express.Router();
 const redisClient = require('../config/redis');
 const User = require('../models/User');
@@ -12,96 +12,50 @@ userApp.get('/panel/:token', async (req, res) => {
     try {
         const token = req.params.token;
         const user = await User.findOne({ token: token });
-        
-        if(!user) {
-            return res.status(404).send("User not found or Invalid Token!");
-        }
+        if(!user) return res.status(404).send("User not found or Invalid Token!");
 
-        // User ပိုင်ဆိုင်သော Key (၅) ခုကို Dropdown တွင် ပြမည်
         let dropdownOptions = `<optgroup label="${user.groupName}">`;
-        
-        if (user.accessKeys) {
+        if (user.accessKeys && Object.keys(user.accessKeys).length > 0) {
             Object.keys(user.accessKeys).forEach(serverName => {
                 const isSelected = user.currentServer === serverName ? 'selected' : '';
                 dropdownOptions += `<option value="${serverName}" ${isSelected}>${serverName}</option>`;
             });
+        } else {
+            dropdownOptions += `<option disabled>Master Panel မှ Key မပို့သေးပါ</option>`;
         }
         dropdownOptions += `</optgroup>`;
 
         const ssconfLink = `ssconf://${req.get('host')}/${token}.json#VPN-${encodeURIComponent(user.name.replace(/\s+/g, ''))}`;
 
         res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <script src="https://cdn.tailwindcss.com"></script>
-                <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-            </head>
+            <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
             <body class="bg-gray-100 flex justify-center items-center min-h-screen p-4">
                 <div class="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md">
-                    <div class="text-center mb-6">
-                        <h2 class="text-2xl font-black text-gray-800"><i class="fas fa-shield-alt text-indigo-600 mr-2"></i>My VPN</h2>
-                        <p class="text-gray-500 mt-1">Hello, <b class="text-gray-800">${user.name}</b></p>
-                    </div>
-                    
-                    <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl shadow transition transform hover:-translate-y-1 mb-6 flex justify-center items-center text-lg">
-                        <i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK
-                    </button>
-
+                    <div class="text-center mb-6"><h2 class="text-2xl font-black text-gray-800"><i class="fas fa-shield-alt text-indigo-600 mr-2"></i>My VPN</h2><p class="text-gray-500 mt-1">Hello, <b class="text-gray-800">${user.name}</b></p></div>
+                    <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl shadow transition transform hover:-translate-y-1 mb-6 flex justify-center items-center text-lg"><i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK</button>
                     <div class="bg-gray-50 p-5 rounded-xl mb-6 border border-gray-200">
                         <p class="mb-2 text-sm text-gray-500 uppercase font-bold tracking-wider">Data Usage</p>
-                        <div class="flex justify-between items-end mb-2">
-                            <span class="text-2xl font-black text-indigo-600">${user.usedGB} <span class="text-base font-medium">GB</span></span>
-                            <span class="text-gray-500 font-medium">/ ${user.totalGB} GB</span>
-                        </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2">
-                            <div class="bg-indigo-500 h-2 rounded-full" style="width: ${(user.usedGB / user.totalGB) * 100}%"></div>
-                        </div>
+                        <div class="flex justify-between items-end mb-2"><span class="text-2xl font-black text-indigo-600">${user.usedGB} <span class="text-base font-medium">GB</span></span><span class="text-gray-500 font-medium">/ ${user.totalGB} GB</span></div>
+                        <div class="w-full bg-gray-200 rounded-full h-2"><div class="bg-indigo-500 h-2 rounded-full" style="width: ${(user.usedGB / user.totalGB) * 100}%"></div></div>
                         <p class="text-xs text-center text-red-500 font-bold mt-3"><i class="far fa-clock"></i> Expire: ${user.expireDate}</p>
                     </div>
-
                     <form action="/panel/change-server" method="POST">
                         <input type="hidden" name="token" value="${token}">
                         <label class="block text-sm font-bold text-gray-700 mb-2">Switch Location</label>
-                        <select name="newServer" class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 outline-none font-semibold text-gray-700">
-                            ${dropdownOptions}
-                        </select>
+                        <select name="newServer" class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 outline-none font-semibold text-gray-700">${dropdownOptions}</select>
                         <button type="submit" class="w-full bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-lg shadow transition">Switch Now</button>
                     </form>
                 </div>
-                
                 <script>
                     function copyLink(link) {
-                        var tempInput = document.createElement("input"); 
-                        tempInput.value = link; 
-                        document.body.appendChild(tempInput); 
-                        tempInput.select(); 
-                        tempInput.setSelectionRange(0, 99999);
-                        
-                        try {
-                            document.execCommand("copy"); 
-                            var btn = document.getElementById('copyBtn'); 
-                            btn.innerHTML = '<i class="fas fa-check-circle mr-3 text-xl"></i> LINK COPIED!'; 
-                            btn.classList.replace('bg-green-500', 'bg-teal-600');
-                            
-                            setTimeout(() => { 
-                                btn.innerHTML = '<i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK'; 
-                                btn.classList.replace('bg-teal-600', 'bg-green-500'); 
-                            }, 3000);
-                        } catch(err) {
-                            alert("Copy ကူးရာတွင် အဆင်မပြေပါ။");
-                        }
-                        
-                        document.body.removeChild(tempInput);
+                        var tempInput = document.createElement("input"); tempInput.value = link; document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
+                        var btn = document.getElementById('copyBtn'); btn.innerHTML = '<i class="fas fa-check-circle mr-3 text-xl"></i> LINK COPIED!'; btn.classList.replace('bg-green-500', 'bg-teal-600');
+                        setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK'; btn.classList.replace('bg-teal-600', 'bg-green-500'); }, 3000);
                     }
                 </script>
-            </body>
-            </html>
+            </body></html>
         `);
-    } catch (error) { 
-        res.status(500).send("System Error"); 
-    }
+    } catch (error) { res.status(500).send("System Error"); }
 });
 
 // ==========================================
@@ -111,37 +65,22 @@ userApp.post('/panel/change-server', async (req, res) => {
     const { token, newServer } = req.body;
     try {
         const user = await User.findOne({ token: token });
-        
         if (user && user.accessKeys && user.accessKeys[newServer]) {
-            // ၁။ ကျနော်တို့ Database ကို အရင် Update လုပ်မည်
             user.currentServer = newServer;
             await user.save(); 
-            
-            // ၂။ Cache အဟောင်းကို ဖျက်မည်
-            await redisClient.del(token);
+            await redisClient.del(token); 
 
-            // 🌟 ၃။ MASTER PANEL သို့ WEBHOOK လှမ်းပို့မည့် အပိုင်း 🌟
+            // 🌟 Master Panel သို့ Webhook ပို့မည့် နေရာ (URL အမှန် ပြင်ဆင်ပြီး) 🌟
             try {
                 const masterWebhookUrl = 'http://178.128.55.202:8888/api/webhook/switch'; 
-                
-                await axios.post(masterWebhookUrl, {
-                    token: token,
-                    activeServer: newServer
-                });
+                await axios.post(masterWebhookUrl, { token: token, activeServer: newServer });
                 console.log(`✅ Webhook Sent: User ${token} switched to ${newServer}`);
-                
             } catch (webhookError) {
-                // ဟိုဘက်ဆာဗာ ပိတ်နေရင်တောင် ကျနော်တို့ဘက်က User Error မတက်အောင် catch ဖမ်းထားပါသည်
-                console.error("❌ Webhook Failed to send:", webhookError.message);
+                console.error("❌ Webhook Failed to send");
             }
         }
-        
-        // ၄။ အားလုံးပြီးလျှင် User ကို Panel ဆီ ပြန်ပို့မည်
         res.redirect('/panel/' + token);
-        
-    } catch (error) { 
-        res.status(500).send("Error changing server"); 
-    }
+    } catch (error) { res.status(500).send("Error changing server"); }
 });
 
 // ==========================================
@@ -151,22 +90,17 @@ userApp.get('/:token.json', async (req, res) => {
     const token = req.params.token;
     try {
         const cachedKey = await redisClient.get(token);
-        if (cachedKey) {
-            return res.json({ server: cachedKey }); 
-        }
+        if (cachedKey) return res.json({ server: cachedKey }); 
         
         const user = await User.findOne({ token: token });
-        
         if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
             const outlineKey = user.accessKeys[user.currentServer];
             await redisClient.setEx(token, 300, outlineKey);
             return res.json({ server: outlineKey });
         }
-        
         res.status(404).json({ error: "Configuration Not Found" });
-    } catch (error) { 
-        res.status(500).json({ error: "System Error" }); 
-    }
+    } catch (error) { res.status(500).json({ error: "System Error" }); }
 });
 
+// မဖြစ်မနေ လိုအပ်သော အောက်ဆုံးလိုင်း (EXPORTS)
 module.exports = userApp;
