@@ -1,145 +1,182 @@
 const express = require('express');
 const adminApp = express.Router();
+const Group = require('../models/Group');
 const Server = require('../models/Server');
 const User = require('../models/User');
 const authenticateAPI = require('../middlewares/auth');
 require('dotenv').config();
 
-// ➕ Add Server
-adminApp.post('/add-server', async (req, res) => {
-    try {
-        const { groupName, serverName, serverKey } = req.body;
-        if (groupName && serverName && serverKey) await Server.create({ groupName, serverName, serverKey });
-        res.redirect('/admin');
-    } catch (error) { res.status(500).send("Error adding server"); }
-});
-
-// ➕ Add User (Group သတ်မှတ်ချက်ပါဝင်သည်)
-adminApp.post('/add-user', async (req, res) => {
-    try {
-        const { name, token, totalGB, serverName } = req.body;
-        if (name && token && totalGB && serverName) {
-            // Server နာမည်ကိုကြည့်ပြီး သူဘယ် Group ကလဲဆိုတာကို အရင်ရှာမည်
-            const serverInfo = await Server.findOne({ serverName: serverName });
-            if(serverInfo) {
-                await User.create({ name, token, groupName: serverInfo.groupName, totalGB: Number(totalGB), usedGB: 0, currentServer: serverName });
-            }
-        }
-        res.redirect('/admin');
-    } catch (error) { res.status(500).send("Error adding user"); }
-});
-
-// 🖥️ Admin UI
+// ==========================================
+// 1. HOME DASHBOARD (Groups များကိုသာ ပြမည်)
+// ==========================================
 adminApp.get('/', async (req, res) => {
-    const servers = await Server.find({});
-    const users = await User.find({});
+    const groups = await Group.find({});
     
-    // Group လိုက် Data များကို စုစည်းခြင်း
-    const groups = {};
-    let serverDropdown = '';
-    
-    servers.forEach(s => {
-        if (!groups[s.groupName]) groups[s.groupName] = { servers: [], users: [] };
-        groups[s.groupName].servers.push(s);
-        serverDropdown += `<option value="${s.serverName}">${s.serverName} (${s.groupName})</option>`;
-    });
-
-    users.forEach(u => {
-        if (!groups[u.groupName]) groups[u.groupName] = { servers: [], users: [] };
-        groups[u.groupName].users.push(u);
-    });
-
-    let mainHtml = '';
-    for (const gName in groups) {
-        let serversHtml = '';
-        groups[gName].servers.forEach(s => {
-            serversHtml += `<div class="bg-gray-100 px-3 py-2 rounded mb-2 flex justify-between"><span class="font-bold text-gray-700 text-sm">${s.serverName}</span><code class="text-xs text-gray-500 truncate w-32">${s.serverKey}</code></div>`;
-        });
-
-        let usersHtml = '';
-        groups[gName].users.forEach(u => {
-            const usage = (u.usedGB / u.totalGB) * 100;
-            const link = `ssconf://${process.env.VPS_IP}:${process.env.USER_PORT}/${u.token}.json#VPN-${u.name.replace(/\s+/g, '')}`;
-            
-            usersHtml += `
-            <tr class="border-b hover:bg-gray-50">
-                <td class="p-3"><div class="font-bold">${u.name}</div><div class="text-xs text-gray-400 font-mono">${u.token}</div></td>
-                <td class="p-3 text-sm font-semibold text-indigo-600">${u.currentServer}</td>
-                <td class="p-3 w-1/4">
-                    <div class="text-xs mb-1">${u.usedGB} / ${u.totalGB} GB</div>
-                    <div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-blue-500 h-1.5 rounded-full" style="width: ${usage}%"></div></div>
-                </td>
-                <td class="p-3 text-right">
-                    <button onclick="copyLink('${link}')" class="bg-green-100 text-green-700 hover:bg-green-500 hover:text-white px-3 py-1.5 rounded text-xs font-bold transition shadow-sm border border-green-200">
-                        <i class="fas fa-copy mr-1"></i> Copy SSConf
-                    </button>
-                </td>
-            </tr>`;
-        });
-
-        mainHtml += `
-        <div class="bg-white rounded-xl shadow-sm border p-6 mb-8 border-t-4 border-indigo-500">
-            <h2 class="text-2xl font-black text-gray-800 mb-6"><i class="fas fa-layer-group text-indigo-500 mr-2"></i> ${gName}</h2>
-            <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <div class="lg:col-span-1 bg-gray-50 p-4 rounded-lg border">
-                    <h3 class="font-bold text-gray-700 mb-3 text-sm uppercase tracking-wider">Nodes in Package</h3>
-                    ${serversHtml || '<p class="text-xs text-gray-400">No servers added yet.</p>'}
-                </div>
-                <div class="lg:col-span-3">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead><tr class="bg-gray-100 text-xs uppercase text-gray-500"><th class="p-3">User Key</th><th class="p-3">Active Node</th><th class="p-3">Data Limit</th><th class="p-3 text-right">Action</th></tr></thead>
-                            <tbody>${usersHtml || '<tr><td colspan="4" class="p-4 text-center text-sm text-gray-400">No users in this group yet.</td></tr>'}</tbody>
-                        </table>
-                    </div>
-                </div>
+    let groupsHtml = '';
+    for (const g of groups) {
+        const userCount = await User.countDocuments({ groupName: g.name });
+        const serverCount = await Server.countDocuments({ groupName: g.name });
+        
+        groupsHtml += `
+        <div class="bg-white rounded-xl shadow-sm border p-6 flex flex-col justify-between hover:shadow-md transition">
+            <div>
+                <h3 class="text-xl font-bold text-gray-800 mb-2"><i class="fas fa-folder-open text-indigo-500 mr-2"></i>${g.name}</h3>
+                <p class="text-sm text-gray-500 mb-4">Servers: <b>${serverCount}</b> | Users: <b>${userCount}</b></p>
             </div>
+            <a href="/admin/group/${encodeURIComponent(g.name)}" class="text-center w-full bg-indigo-50 text-indigo-700 font-bold py-2 rounded-lg hover:bg-indigo-600 hover:text-white transition">
+                ဝင်ရောက်ကြည့်ရှုမည် <i class="fas fa-arrow-right ml-1"></i>
+            </a>
         </div>`;
     }
 
     res.send(`
         <!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
-        <body class="bg-gray-100 font-sans pb-10">
-            <nav class="bg-indigo-700 text-white shadow-md p-4 mb-6"><div class="max-w-7xl mx-auto font-bold text-xl"><i class="fas fa-database mr-2"></i>VPN Master Management</div></nav>
-            <div class="max-w-7xl mx-auto px-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                    <div class="bg-white rounded-xl shadow border p-5">
-                        <h2 class="font-bold text-gray-800 mb-4"><i class="fas fa-plus text-green-500 mr-2"></i> Add Server Node</h2>
-                        <form action="/admin/add-server" method="POST" class="space-y-3">
-                            <input type="text" name="groupName" placeholder="Group / Package Name (e.g. ⭐ VIP Asia)" required class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none">
-                            <input type="text" name="serverName" placeholder="Server Name (e.g. SG-1)" required class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none">
-                            <input type="text" name="serverKey" placeholder="ss://..." required class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none">
-                            <button type="submit" class="w-full bg-gray-800 text-white p-2 rounded font-bold hover:bg-black">Save Node</button>
-                        </form>
-                    </div>
-                    <div class="bg-white rounded-xl shadow border p-5">
-                        <h2 class="font-bold text-gray-800 mb-4"><i class="fas fa-user-plus text-blue-500 mr-2"></i> Generate User Key</h2>
-                        <form action="/admin/add-user" method="POST" class="space-y-3">
-                            <input type="text" name="name" placeholder="Customer Name or Note" required class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none">
-                            <input type="text" name="token" placeholder="Custom Secret Token (e.g. user_ko_aung_01)" required class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none">
-                            <div class="flex gap-3">
-                                <input type="number" name="totalGB" placeholder="Total GB" required class="w-1/3 border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none">
-                                <select name="serverName" required class="w-2/3 border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none">
-                                    <option value="" disabled selected>Assign to Package & Server...</option>
-                                    ${serverDropdown}
-                                </select>
-                            </div>
-                            <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded font-bold hover:bg-blue-700">Generate Key</button>
+        <body class="bg-gray-50 font-sans pb-10">
+            <nav class="bg-indigo-700 text-white shadow-md p-4 mb-8"><div class="max-w-6xl mx-auto font-bold text-xl"><i class="fas fa-shield-alt mr-2"></i>VPN Admin Panel</div></nav>
+            <div class="max-w-6xl mx-auto px-4">
+                <div class="flex justify-between items-center mb-6">
+                    <h1 class="text-2xl font-black text-gray-800">Server Groups</h1>
+                </div>
+
+                <div class="bg-white p-5 rounded-xl shadow-sm border mb-8 flex gap-4 items-end">
+                    <div class="flex-1">
+                        <label class="block text-sm font-bold text-gray-700 mb-2">Create New Group (ဥပမာ - VIP Package)</label>
+                        <form action="/admin/create-group" method="POST" class="flex gap-4">
+                            <input type="text" name="groupName" placeholder="Group Name..." required class="flex-1 border p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-gray-50">
+                            <button type="submit" class="bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700 shadow-sm"><i class="fas fa-plus mr-2"></i>Create Group</button>
                         </form>
                     </div>
                 </div>
-                ${mainHtml}
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    ${groupsHtml || '<p class="text-gray-400">Group မရှိသေးပါ။ အသစ်တည်ဆောက်ပါ။</p>'}
+                </div>
+            </div>
+        </body></html>
+    `);
+});
+
+adminApp.post('/create-group', async (req, res) => {
+    try {
+        if (req.body.groupName) await Group.create({ name: req.body.groupName });
+        res.redirect('/admin');
+    } catch (error) { res.status(500).send("Error creating group (Name may already exist)"); }
+});
+
+// ==========================================
+// 2. INSIDE GROUP VIEW (User Key နှင့် Server များ)
+// ==========================================
+adminApp.get('/group/:name', async (req, res) => {
+    const groupName = req.params.name;
+    const servers = await Server.find({ groupName: groupName });
+    const users = await User.find({ groupName: groupName });
+
+    let serversHtml = '';
+    servers.forEach(s => {
+        serversHtml += `<div class="bg-gray-100 px-4 py-2 rounded-lg mb-2 flex justify-between items-center"><span class="font-bold text-gray-700">${s.serverName}</span><code class="text-xs text-gray-500 truncate w-32">${s.serverKey}</code></div>`;
+    });
+
+    let usersHtml = '';
+    users.forEach((u, index) => {
+        const link = `ssconf://${process.env.VPS_IP}:${process.env.USER_PORT}/${u.token}.json#VPN-${u.name.replace(/\s+/g, '')}`;
+        usersHtml += `
+        <tr class="border-b hover:bg-gray-50">
+            <td class="p-4 text-gray-500 font-bold">${index + 1}</td>
+            <td class="p-4"><div class="font-bold text-gray-800 text-base">${u.name}</div><div class="text-xs text-indigo-500 font-mono">Token: ${u.token}</div></td>
+            <td class="p-4 text-sm font-semibold text-gray-600">${u.currentServer}</td>
+            <td class="p-4 text-sm text-red-500 font-semibold"><i class="far fa-clock mr-1"></i>${u.expireDate}</td>
+            <td class="p-4"><div class="text-sm font-bold text-gray-700">${u.usedGB} / ${u.totalGB} GB</div></td>
+            <td class="p-4 text-right">
+                <button onclick="copyLink('${link}')" class="bg-gray-800 text-white hover:bg-black px-4 py-2 rounded-lg text-xs font-bold transition shadow">
+                    <i class="fas fa-copy mr-1"></i> Copy SSConf
+                </button>
+            </td>
+        </tr>`;
+    });
+
+    res.send(`
+        <!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
+        <body class="bg-gray-50 font-sans pb-10">
+            <nav class="bg-indigo-700 text-white shadow-md p-4 mb-6">
+                <div class="max-w-6xl mx-auto flex items-center">
+                    <a href="/admin" class="hover:text-gray-300 mr-4 text-xl"><i class="fas fa-arrow-left"></i></a>
+                    <span class="font-bold text-xl">${groupName} Management</span>
+                </div>
+            </nav>
+            <div class="max-w-6xl mx-auto px-4">
+                
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                    <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border p-6">
+                        <h2 class="font-bold text-gray-800 mb-4 text-lg"><i class="fas fa-key text-yellow-500 mr-2"></i> Create User Key</h2>
+                        <form action="/admin/add-user" method="POST" class="grid grid-cols-2 gap-4">
+                            <input type="hidden" name="groupName" value="${groupName}">
+                            <div class="col-span-2"><input type="text" name="name" placeholder="User Name / Note" required class="w-full border p-3 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"></div>
+                            <input type="text" name="token" placeholder="Unique Token (e.g. key123)" required class="border p-3 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <input type="number" name="totalGB" placeholder="Data Limit (GB)" required class="border p-3 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <div class="col-span-2 flex gap-4 items-center">
+                                <input type="date" name="expireDate" required class="flex-1 border p-3 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-600">
+                                <button type="submit" class="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-700 shadow-sm w-1/2">Generate Key</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-sm border p-6">
+                        <h2 class="font-bold text-gray-800 mb-4"><i class="fas fa-server text-gray-500 mr-2"></i> Add Server Node</h2>
+                        <form action="/admin/add-server" method="POST" class="space-y-3 mb-6">
+                            <input type="hidden" name="groupName" value="${groupName}">
+                            <input type="text" name="serverName" placeholder="Node Name (e.g. SG-1)" required class="w-full border p-2 rounded-lg bg-gray-50 text-sm outline-none">
+                            <input type="text" name="serverKey" placeholder="Outline Key (ss://...)" required class="w-full border p-2 rounded-lg bg-gray-50 text-sm outline-none">
+                            <button type="submit" class="w-full bg-gray-200 text-gray-800 p-2 rounded-lg font-bold hover:bg-gray-300 text-sm">Add Server</button>
+                        </form>
+                        <hr class="mb-4">
+                        <h3 class="font-bold text-xs text-gray-400 uppercase tracking-wider mb-2">Available Nodes (${servers.length})</h3>
+                        <div class="max-h-32 overflow-y-auto">${serversHtml || '<p class="text-xs text-red-400">Server ထည့်ပေးရန် လိုအပ်ပါသည်။</p>'}</div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                    <div class="p-5 border-b bg-gray-50"><h2 class="text-xl font-bold text-gray-800"><i class="fas fa-users text-gray-400 mr-2"></i> Key List (${users.length})</h2></div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead><tr class="bg-gray-100 text-xs uppercase text-gray-500"><th class="p-4 w-10">No</th><th class="p-4">User Details</th><th class="p-4">Active Node</th><th class="p-4">Expire Date</th><th class="p-4">Data Usage</th><th class="p-4 text-right">Action</th></tr></thead>
+                            <tbody>${usersHtml || '<tr><td colspan="6" class="p-6 text-center text-gray-400">ဒီ Group မှာ User မရှိသေးပါ။</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
             <script>
                 function copyLink(link) {
-                    navigator.clipboard.writeText(link).then(() => { alert("✅ SSConf Link Copied! You can send this to the user."); }).catch(() => { alert("Failed to copy link."); });
+                    navigator.clipboard.writeText(link).then(() => { alert("✅ SSConf Link Copied Successfully!"); }).catch(() => { alert("Failed to copy link."); });
                 }
             </script>
         </body></html>
     `);
 });
 
-// APIs (Same as before)
+// APIs & Form Handlers
+adminApp.post('/add-server', async (req, res) => {
+    try {
+        const { groupName, serverName, serverKey } = req.body;
+        if (groupName && serverName && serverKey) await Server.create({ groupName, serverName, serverKey });
+        res.redirect('/admin/group/' + encodeURIComponent(groupName));
+    } catch (error) { res.status(500).send("Error adding server"); }
+});
+
+adminApp.post('/add-user', async (req, res) => {
+    try {
+        const { groupName, name, token, totalGB, expireDate } = req.body;
+        // Group ထဲက ပထမဆုံး Server ကို အလိုအလျောက် ချိတ်ပေးမည် (User Form တွင် Server ရွေးစရာမလိုအောင် ရှင်းထုတ်ထားသည်)
+        const firstServer = await Server.findOne({ groupName: groupName });
+        const defaultServer = firstServer ? firstServer.serverName : "None";
+
+        if (name && token && totalGB && expireDate) {
+            await User.create({ name, token, groupName, totalGB: Number(totalGB), usedGB: 0, currentServer: defaultServer, expireDate });
+        }
+        res.redirect('/admin/group/' + encodeURIComponent(groupName));
+    } catch (error) { res.status(500).send("Error adding user (Token must be unique)"); }
+});
+
+// Internal APIs for User Panel
 adminApp.post('/api/internal/get-server', authenticateAPI, async (req, res) => {
     const user = await User.findOne({token: req.body.token});
     if (user) {
