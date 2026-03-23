@@ -67,25 +67,65 @@ userApp.get('/panel/:token', async (req, res) => {
 // ==========================================
 // 2. CHANGE SERVER API & WEBHOOK
 // ==========================================
+// ==========================================
+// 2. CHANGE SERVER API & WEBHOOK (Auto-Sync Key ပါဝင်သည်)
+// ==========================================
 userApp.post('/panel/change-server', async (req, res) => {
     const { token, newServer } = req.body;
     try {
         const user = await User.findOne({ token: token });
-        if (user && user.accessKeys && user.accessKeys[newServer]) {
-            user.currentServer = newServer;
-            await user.save(); 
-            await redisClient.del(token); 
+        if (!user) return res.status(404).send("User not found");
 
-            try {
-                const masterWebhookUrl = 'http://178.128.55.202:8888/api/webhook/switch'; 
-                await axios.post(masterWebhookUrl, { token: token, activeServer: newServer });
-                console.log(`✅ Webhook Sent: User ${token} switched to ${newServer}`);
-            } catch (webhookError) {
-                console.error("❌ Webhook Failed to send");
+        // 🌟 အရေးကြီး - ရွေးလိုက်တဲ့ ဆာဗာအတွက် Key ရှိမရှိ စစ်မယ်၊ မရှိရင် Master ဆီက လှမ်းတောင်းမယ်
+        if (!user.accessKeys || !user.accessKeys[newServer]) {
+            console.log(`🔍 Key missing for ${newServer}. Requesting update from Master...`);
+            
+            const Group = require('../models/Group'); // Group model ကို လှမ်းခေါ်ပါမည်
+            const groupInfo = await Group.findOne({ name: user.groupName });
+            
+            if (groupInfo) {
+                const masterApiUrl = 'http://178.128.55.202:8888/api/generate-keys'; 
+                try {
+                    const masterResponse = await axios.post(masterApiUrl, {
+                        masterGroupId: groupInfo.masterGroupId,
+                        userName: user.name,
+                        totalGB: user.totalGB,
+                        expireDate: user.expireDate
+                    }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
+
+                    if (masterResponse.data && masterResponse.data.keys) {
+                        // Master ကပေးတဲ့ Key အသစ်တွေကို DB ထဲ အသစ်ပြန်ထည့်မည်
+                        user.accessKeys = masterResponse.data.keys;
+                        user.markModified('accessKeys'); // 🌟 Data အသစ်ဝင်ကြောင်း စနစ်ကို အသိပေးခြင်း
+                        console.log(`✅ Keys synced from Master for User: ${user.name}`);
+                    }
+                } catch (err) {
+                    console.error("❌ Failed to sync keys from Master during switch");
+                }
             }
         }
+
+        // ဆာဗာပြောင်းခြင်းကို အတည်ပြုပြီး သိမ်းမည်
+        user.currentServer = newServer;
+        await user.save(); 
+        
+        // Cache အဟောင်းကို ဖျက်မည် (ချက်ချင်း Update ဖြစ်စေရန်)
+        await redisClient.del(token); 
+
+        // Master ဆီကို Webhook လှမ်းပို့မည် (တခြား Key တွေကို Pause လုပ်ခိုင်းရန်)
+        try {
+            const masterWebhookUrl = 'http://178.128.55.202:8888/api/webhook/switch'; 
+            await axios.post(masterWebhookUrl, { token: token, activeServer: newServer });
+            console.log(`✅ Webhook Sent: User switched to ${newServer}`);
+        } catch (webhookError) {
+            console.error("❌ Webhook Failed to send");
+        }
+
         res.redirect('/panel/' + token);
-    } catch (error) { res.status(500).send("Error changing server"); }
+    } catch (error) { 
+        console.error(error);
+        res.status(500).send("Error changing server"); 
+    }
 });
 
 // ==========================================
