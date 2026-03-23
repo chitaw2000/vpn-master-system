@@ -10,31 +10,35 @@ userApp.get('/panel/:token', async (req, res) => {
     try {
         const token = req.params.token;
         const user = await User.findOne({ token: token });
-        if(!user) return res.status(404).send("User not found!");
+        if(!user) return res.status(404).send("User not found or Invalid Token!");
 
-        // 🌟 အရေးကြီး: User ပိုင်ဆိုင်သော Group ထဲက Server များကိုသာ ဆွဲထုတ်မည်
         const availableServers = await Server.find({ groupName: user.groupName });
+        let dropdownOptions = `<optgroup label="${user.groupName}">`;
         
-        let dropdownOptions = `<optgroup label="${user.groupName} Package">`;
         availableServers.forEach(s => {
             const isSelected = user.currentServer === s.serverName ? 'selected' : '';
             dropdownOptions += `<option value="${s.serverName}" ${isSelected}>${s.serverName}</option>`;
         });
         dropdownOptions += `</optgroup>`;
 
-        const ssconfLink = `ssconf://${req.get('host')}/${token}.json#VPN-${user.name.replace(/\s+/g, '')}`;
+        const ssconfLink = `ssconf://${req.get('host')}/${token}.json#VPN-${encodeURIComponent(user.name.replace(/\s+/g, ''))}`;
 
         res.send(`
-            <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <script src="https://cdn.tailwindcss.com"></script>
+                <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+            </head>
             <body class="bg-gray-100 flex justify-center items-center min-h-screen p-4">
                 <div class="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md">
                     <div class="text-center mb-6">
                         <h2 class="text-2xl font-black text-gray-800"><i class="fas fa-shield-alt text-indigo-600 mr-2"></i>My VPN</h2>
                         <p class="text-gray-500 mt-1">Hello, <b class="text-gray-800">${user.name}</b></p>
-                        <span class="inline-block mt-2 bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded-full font-bold">${user.groupName}</span>
                     </div>
                     
-                    <button onclick="copyLink('${ssconfLink}')" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl shadow transition transform hover:-translate-y-1 mb-6 flex justify-center items-center text-lg">
+                    <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl shadow transition transform hover:-translate-y-1 mb-6 flex justify-center items-center text-lg">
                         <i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK
                     </button>
 
@@ -49,7 +53,7 @@ userApp.get('/panel/:token', async (req, res) => {
                         </div>
                     </div>
 
-                    <form action="/panel/change-server" method="POST" class="bg-white p-1">
+                    <form action="/panel/change-server" method="POST">
                         <input type="hidden" name="token" value="${token}">
                         <label class="block text-sm font-bold text-gray-700 mb-2">Switch Location</label>
                         <select name="newServer" class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 outline-none">
@@ -60,15 +64,25 @@ userApp.get('/panel/:token', async (req, res) => {
                 </div>
                 <script>
                     function copyLink(link) {
-                        navigator.clipboard.writeText(link).then(() => {
-                            const btn = document.querySelector('button');
-                            btn.innerHTML = '<i class="fas fa-check-circle mr-3 text-xl"></i> LINK COPIED!';
-                            btn.classList.replace('bg-green-500', 'bg-teal-600');
-                            setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK'; btn.classList.replace('bg-teal-600', 'bg-green-500'); }, 3000);
-                        });
+                        var tempInput = document.createElement("input"); 
+                        tempInput.value = link; 
+                        document.body.appendChild(tempInput); 
+                        tempInput.select(); 
+                        document.execCommand("copy"); 
+                        document.body.removeChild(tempInput);
+                        
+                        var btn = document.getElementById('copyBtn'); 
+                        btn.innerHTML = '<i class="fas fa-check-circle mr-3 text-xl"></i> LINK COPIED!'; 
+                        btn.classList.replace('bg-green-500', 'bg-teal-600');
+                        
+                        setTimeout(() => { 
+                            btn.innerHTML = '<i class="fas fa-copy mr-3 text-xl"></i> COPY SSCONF LINK'; 
+                            btn.classList.replace('bg-teal-600', 'bg-green-500'); 
+                        }, 3000);
                     }
                 </script>
-            </body></html>
+            </body>
+            </html>
         `);
     } catch (error) { res.status(500).send("System Error"); }
 });
@@ -82,18 +96,29 @@ userApp.post('/panel/change-server', async (req, res) => {
     } catch (error) { res.status(500).send("Error"); }
 });
 
+// 🌟 Outline App ဖတ်ရန် သီးသန့် JSON API (Format အတိအကျ)
 userApp.get('/:token.json', async (req, res) => {
-    // Code အတူတူပါပဲ...
     const token = req.params.token;
     try {
         const cachedKey = await redisClient.get(token);
-        if (cachedKey) return res.json({ server: cachedKey });
-        const response = await axios.post(`http://127.0.0.1:${process.env.ADMIN_PORT}/api/internal/get-server`, { token }, { headers: { 'x-api-key': process.env.SECRET_API_KEY } });
+        if (cachedKey) {
+            // Outline မျှော်လင့်ထားသော JSON Format
+            return res.json({ server: cachedKey }); 
+        }
+        
+        const response = await axios.post(`http://127.0.0.1:${process.env.ADMIN_PORT}/api/internal/get-server`, 
+            { token }, 
+            { headers: { 'x-api-key': process.env.SECRET_API_KEY } }
+        );
+        
         if (response.data && response.data.outline_key) {
             await redisClient.setEx(token, 300, response.data.outline_key);
+            // Outline မျှော်လင့်ထားသော JSON Format
             return res.json({ server: response.data.outline_key });
         }
-    } catch (error) { res.status(500).json({ error: "Config Error" }); }
+    } catch (error) { 
+        res.status(500).json({ error: "Configuration Error" }); 
+    }
 });
 
 module.exports = userApp;
