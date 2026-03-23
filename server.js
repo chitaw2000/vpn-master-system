@@ -17,5 +17,9 @@ adminApp.use('/admin', adminRoutes);
 adminApp.use('/api/internal', adminRoutes);
 userApp.use('/', userRoutes);
 
-adminApp.listen(process.env.ADMIN_PORT, () => console.log(`🚀 Admin Dashboard: http://${process.env.VPS_IP}:${process.env.ADMIN_PORT}/admin`));
-userApp.listen(process.env.USER_PORT, () => console.log(`🚀 User Panel     : http://${process.env.VPS_IP}:${process.env.USER_PORT}/panel/nyeSkpYVgoPSe3suIRtys8Lhl09xDohZ`));
+const ADMIN_PORT = process.env.ADMIN_PORT || 4000;
+const USER_PORT = process.env.USER_PORT || 3000;
+const VPS_IP = process.env.VPS_IP || '127.0.0.1';
+
+adminApp.listen(ADMIN_PORT, () => console.log(`🚀 Admin Dashboard: http://${VPS_IP}:${ADMIN_PORT}/admin`));
+userApp.listen(USER_PORT, () => console.log(`🚀 User Panel     : http://${VPS_IP}:${USER_PORT}/panel`));
