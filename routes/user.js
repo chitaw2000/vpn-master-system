@@ -97,28 +97,24 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // 🌟 Outline App ဖတ်ရန် သီးသန့် JSON API (Format အတိအကျ)
-userApp.get('/:token.json', async (req, res) => {
-    const token = req.params.token;
-    try {
-        const cachedKey = await redisClient.get(token);
-        if (cachedKey) {
-            // Outline မျှော်လင့်ထားသော JSON Format
-            return res.json({ server: cachedKey }); 
-        }
-        
-        const response = await axios.post(`http://127.0.0.1:${process.env.ADMIN_PORT}/api/internal/get-server`, 
-            { token }, 
-            { headers: { 'x-api-key': process.env.SECRET_API_KEY } }
-        );
-        
-        if (response.data && response.data.outline_key) {
-            await redisClient.setEx(token, 300, response.data.outline_key);
-            // Outline မျှော်လင့်ထားသော JSON Format
-            return res.json({ server: response.data.outline_key });
-        }
-    } catch (error) { 
-        res.status(500).json({ error: "Configuration Error" }); 
-    }
-});
+// ... (အပေါ်ပိုင်းက Code တွေ အတူတူပါပဲ)
 
-module.exports = userApp;
+userApp.get('/panel/:token', async (req, res) => {
+    try {
+        const token = req.params.token;
+        const user = await User.findOne({ token: token });
+        if(!user) return res.status(404).send("User not found or Invalid Token!");
+
+        // 🌟 အရေးကြီး - User ပိုင်ဆိုင်သော Key များကိုသာ Dropdown တွင် ပြမည်
+        let dropdownOptions = `<optgroup label="${user.groupName}">`;
+        
+        // keys = {"SG-1": "ss://...", "JP-1": "ss://..."}
+        if (user.accessKeys) {
+            Object.keys(user.accessKeys).forEach(serverName => {
+                const isSelected = user.currentServer === serverName ? 'selected' : '';
+                dropdownOptions += `<option value="${serverName}" ${isSelected}>${serverName}</option>`;
+            });
+        }
+        dropdownOptions += `</optgroup>`;
+
+        // ... (HTML ပြမည့် အပိုင်းသည် ယခင်အတိုင်း အတူတူပါပဲ) ...
