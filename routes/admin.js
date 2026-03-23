@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const axios = require('axios'); // 🌟 API လှမ်းခေါ်ရန်
+const axios = require('axios');
 const adminApp = express.Router();
 const Group = require('../models/Group');
 const Server = require('../models/Server');
@@ -9,32 +9,31 @@ const authenticateAPI = require('../middlewares/auth');
 require('dotenv').config();
 
 // ==========================================
-// 1. HOME DASHBOARD (Master Panel မှ Group များ ဆွဲယူမည်)
+// 1. HOME DASHBOARD
 // ==========================================
 adminApp.get('/', async (req, res) => {
     const groups = await Group.find({});
     let groupsHtml = '';
     
-    // ကျနော်တို့ဆီက Group များကို ပြရန်
     for (const g of groups) {
         const userCount = await User.countDocuments({ groupName: g.name });
         groupsHtml += `
         <div class="bg-white rounded-xl shadow-sm border p-6 flex flex-col justify-between hover:shadow-md transition">
             <div>
                 <h3 class="text-xl font-bold text-gray-800 mb-2"><i class="fas fa-link text-indigo-500 mr-2"></i> ${g.name}</h3>
-                <p class="text-xs text-gray-400 mb-2">Linked to Master ID: <b class="text-gray-600">${g.masterGroupId}</b></p>
+                <p class="text-xs text-gray-400 mb-1">Master ID: <b class="text-gray-600">${g.masterGroupId}</b></p>
+                <p class="text-xs text-gray-400 mb-3">NS Record: <b class="text-indigo-600">${g.nsRecord || 'N/A'}</b></p>
                 <p class="text-sm text-gray-500 mb-4">Users: <b>${userCount}</b></p>
             </div>
             <a href="/admin/group/${encodeURIComponent(g.name)}" class="text-center w-full bg-indigo-50 text-indigo-700 font-bold py-2 rounded-lg hover:bg-indigo-600 hover:text-white transition">ဝင်ရောက်မည် <i class="fas fa-arrow-right ml-1"></i></a>
         </div>`;
     }
 
-    // 🌟 Master Panel ဆီမှ Active Group များကို လှမ်းတောင်းမည် 🌟
     let masterGroupsDropdown = '';
     try {
         const response = await axios.get('http://178.128.55.202:8888/api/active-groups', {
             headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' },
-            timeout: 5000 // ၅ စက္ကန့်စောင့်မည်
+            timeout: 5000 
         });
 
         if (response.data && response.data.groups) {
@@ -44,7 +43,6 @@ adminApp.get('/', async (req, res) => {
         }
     } catch (error) {
         masterGroupsDropdown = `<option value="" disabled>Master Panel ချိတ်ဆက်မှု နှောင့်နှေးနေပါသည်</option>`;
-        console.error("Master Group များကို ဆွဲယူ၍ မရပါ။", error.message);
     }
 
     res.send(`
@@ -56,14 +54,16 @@ adminApp.get('/', async (req, res) => {
                 <div class="bg-white p-5 rounded-xl shadow-sm border mb-8 flex gap-4 items-end">
                     <div class="flex-1">
                         <label class="block text-sm font-bold text-gray-700 mb-2">Create & Map New Group</label>
-                        <form action="/admin/create-group" method="POST" class="flex gap-4">
-                            <select name="masterGroupId" required class="w-1/3 border p-3 rounded-lg outline-none bg-gray-50 focus:ring-2 focus:ring-indigo-500 text-sm">
+                        <form action="/admin/create-group" method="POST" class="flex flex-wrap gap-4">
+                            <select name="masterGroupId" required class="w-full md:w-1/4 border p-3 rounded-lg outline-none bg-gray-50 focus:ring-2 focus:ring-indigo-500 text-sm">
                                 <option value="" disabled selected>Master Panel မှ Group ရွေးပါ...</option>
                                 ${masterGroupsDropdown}
                             </select>
                             
-                            <input type="text" name="groupName" placeholder="Local Group Name (e.g. My VIP)..." required class="flex-1 border p-3 rounded-lg outline-none bg-gray-50 focus:ring-2 focus:ring-indigo-500">
-                            <button type="submit" class="bg-green-600 text-white px-6 py-3 rounded-lg font-bold shadow-sm"><i class="fas fa-plus mr-2"></i> Create Group</button>
+                            <input type="text" name="nsRecord" placeholder="NS Record (e.g. ns.allsimmaha.me)" required class="w-full md:w-1/4 border p-3 rounded-lg outline-none bg-gray-50 focus:ring-2 focus:ring-indigo-500 text-sm">
+                            
+                            <input type="text" name="groupName" placeholder="Local Group Name..." required class="flex-1 border p-3 rounded-lg outline-none bg-gray-50 focus:ring-2 focus:ring-indigo-500 text-sm">
+                            <button type="submit" class="bg-green-600 text-white px-6 py-3 rounded-lg font-bold shadow-sm"><i class="fas fa-plus mr-2"></i> Create</button>
                         </form>
                     </div>
                 </div>
@@ -76,8 +76,13 @@ adminApp.get('/', async (req, res) => {
 
 adminApp.post('/create-group', async (req, res) => {
     try {
-        if (req.body.groupName && req.body.masterGroupId) {
-            await Group.create({ name: req.body.groupName, masterGroupId: req.body.masterGroupId });
+        if (req.body.groupName && req.body.masterGroupId && req.body.nsRecord) {
+            // Group ဆောက်တဲ့အခါ nsRecord ကိုပါ Database ထဲ သိမ်းမည်
+            await Group.create({ 
+                name: req.body.groupName, 
+                masterGroupId: req.body.masterGroupId,
+                nsRecord: req.body.nsRecord
+            });
         }
         res.redirect('/admin');
     } catch (error) { res.status(500).send("Error creating group"); }
@@ -88,12 +93,16 @@ adminApp.post('/create-group', async (req, res) => {
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
+    const groupInfo = await Group.findOne({ name: groupName });
     const users = await User.find({ groupName: groupName });
+
+    // 🌟 ဒီ Group ရဲ့ ကိုယ်ပိုင် NS Record ကို ယူမည် (မရှိရင် default IP သုံးမည်)
+    const domainName = (groupInfo && groupInfo.nsRecord) ? groupInfo.nsRecord : process.env.VPS_IP;
 
     let usersHtml = '';
     users.forEach((u, index) => {
-        const link = `ssconf://${process.env.VPS_IP}:${process.env.USER_PORT}/${u.token}.json#VPN-${encodeURIComponent(u.name.replace(/\s+/g, ''))}`;
-        // Server ဘယ်နှစ်ခု ချိတ်ထားလဲ ရေတွက်ပြမည်
+        // ssconf လင့်ခ်တွင် Group ၏ ကိုယ်ပိုင် NS ကို အလိုလို ထည့်ပေးသွားမည်
+        const link = `ssconf://${domainName}/${u.token}.json#VPN-${encodeURIComponent(u.name.replace(/\s+/g, ''))}`;
         const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
 
         usersHtml += `
@@ -145,17 +154,14 @@ adminApp.get('/group/:name', async (req, res) => {
 });
 
 // ==========================================
-// 3. GENERATE KEY (API REQUEST TO MASTER)
+// 3. GENERATE KEY & OTHER APIS
 // ==========================================
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
-        
-        // Master Group ID ကို ရှာမည်
         const groupInfo = await Group.findOne({ name: groupName });
         if (!groupInfo) return res.status(404).send("Group not found");
 
-        // Master ဆီသို့ လှမ်းတောင်းမည်
         const masterApiUrl = 'http://178.128.55.202:8888/api/generate-keys'; 
         const masterResponse = await axios.post(masterApiUrl, {
             masterGroupId: groupInfo.masterGroupId,
@@ -167,8 +173,6 @@ adminApp.post('/add-user', async (req, res) => {
         if (masterResponse.data && masterResponse.data.keys) {
             const keysFromMaster = masterResponse.data.keys;
             const token = crypto.randomBytes(16).toString('hex'); 
-            
-            // ဟိုဘက်က ၃ ခုပို့ရင် ၃ ခု၊ ၅ ခုပို့ရင် ၅ ခု အလိုလို သိမ်းမည်
             const availableServers = Object.keys(keysFromMaster);
             const defaultServer = availableServers.length > 0 ? availableServers[0] : "None";
 
@@ -176,16 +180,14 @@ adminApp.post('/add-user', async (req, res) => {
                 name, token, groupName, 
                 totalGB: Number(totalGB), usedGB: 0, 
                 currentServer: defaultServer, expireDate, 
-                accessKeys: keysFromMaster // 🌟 Key အားလုံးကို သိမ်းလိုက်ပါပြီ
+                accessKeys: keysFromMaster
             });
-            
             res.redirect('/admin/group/' + encodeURIComponent(groupName));
         } else {
             res.status(400).send("Master Panel မှ Key ပြန်မချပေးပါ။");
         }
     } catch (error) { 
-        console.error(error.message);
-        res.status(500).send("Master Panel နှင့် ချိတ်ဆက်၍ မရပါ။ API Error ပါ။"); 
+        res.status(500).send("Master Panel နှင့် ချိတ်ဆက်၍ မရပါ။"); 
     }
 });
 
@@ -196,59 +198,24 @@ adminApp.post('/delete-user', async (req, res) => {
     } catch (error) { res.status(500).send("Error deleting user"); }
 });
 
-// Master မှ GB Update လာလုပ်မည့် API
-adminApp.post('/update-gb-api', authenticateAPI, async (req, res) => {
-    try {
-        const { token, usedGB } = req.body;
-        if (!token || usedGB === undefined) return res.status(400).json({ error: "Required fields missing" });
-        const user = await User.findOneAndUpdate({ token: token }, { usedGB: Number(usedGB) });
-        if (user) res.json({ success: true });
-        else res.status(404).json({ error: "User not found" });
-    } catch (error) { res.status(500).json({ error: "Database Error" }); }
-});
-
-// ==========================================
-// 🌟 1. MASTER မှ SERVER အသစ် ထပ်ထည့်သောအခါ လက်ခံမည့် API
-// ==========================================
 adminApp.post('/sync-new-server', authenticateAPI, async (req, res) => {
     try {
         const { masterGroupId, newServerName, userKeys } = req.body;
-        
-        if (!masterGroupId || !newServerName || !userKeys) {
-            return res.status(400).json({ error: "လိုအပ်သော Data များ မပြည့်စုံပါ။" });
-        }
+        if (!masterGroupId || !newServerName || !userKeys) return res.status(400).json({ error: "Missing data" });
 
-        // userKeys ထဲတွင် ပါလာသော User တစ်ယောက်ချင်းစီ၏ Token ကို ပတ်၍ Update လုပ်မည်
         for (const [token, newOutlineKey] of Object.entries(userKeys)) {
             const user = await User.findOne({ token: token });
-            
             if (user) {
-                // ရှိပြီးသား Key များထဲသို့ ဆာဗာသစ်နှင့် Key အသစ်ကို ပေါင်းထည့်မည်
-                user.accessKeys = {
-                    ...user.accessKeys,
-                    [newServerName]: newOutlineKey
-                };
-                
-                // Mongoose တွင် Object အသစ်ပြောင်းကြောင်း သိစေရန်
+                user.accessKeys = { ...user.accessKeys, [newServerName]: newOutlineKey };
                 user.markModified('accessKeys'); 
                 await user.save();
-                
-                // User ရဲ့ Cache ကို ရှင်းမည် (ချက်ချင်း Update ဖြစ်စေရန်)
-                await redisClient.del(token); 
+                await require('../config/redis').del(token); 
             }
         }
-
-        res.json({ success: true, message: `Server အသစ် ${newServerName} အား User များထံ ထည့်သွင်းပြီးပါပြီ။` });
-
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Server Error during sync-new-server" });
-    }
+        res.json({ success: true, message: `Server ${newServerName} synced.` });
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
-// ==========================================
-// 🌟 2. GB UPDATE လက်ခံခြင်း & GB ပြည့်သွားလျှင် MASTER သို့ လှမ်းပိတ်ခိုင်းခြင်း
-// ==========================================
 adminApp.post('/update-gb-api', authenticateAPI, async (req, res) => {
     try {
         const { token, usedGB } = req.body;
@@ -260,28 +227,15 @@ adminApp.post('/update-gb-api', authenticateAPI, async (req, res) => {
         user.usedGB = Number(usedGB);
         await user.save();
 
-        // 🚨 GB လစ်မစ် ပြည့်သွားခြင်း သို့မဟုတ် ကျော်သွားခြင်း စစ်ဆေးရန်
         if (user.usedGB >= user.totalGB) {
-            console.log(`⚠️ User ${user.name} ၏ Data ပြည့်သွားပါပြီ။ Master သို့ ပိတ်ရန် အကြောင်းကြားနေပါသည်။`);
-            
             try {
-                // Master Panel ဆီသို့ လှမ်းပိတ်ခိုင်းမည် (Webhook)
-                const masterActionUrl = 'http://178.128.55.202:8888/api/user-action';
-                await axios.post(masterActionUrl, {
-                    token: token,
-                    action: "suspend" // ပိတ်ခိုင်းခြင်း
+                await axios.post('http://178.128.55.202:8888/api/user-action', {
+                    token: token, action: "suspend"
                 }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
-                
-                console.log("✅ Master တွင် Key များ ပိတ်ပြီးပါပြီ။");
-            } catch (err) {
-                console.error("❌ Master သို့ ပိတ်ရန် အကြောင်းကြား၍ မရပါ။", err.message);
-            }
+            } catch (err) { console.error("Master သို့ ပိတ်ရန် အကြောင်းကြား၍ မရပါ။"); }
         }
-
-        res.json({ success: true, message: "GB updated successfully" });
-    } catch (error) { 
-        res.status(500).json({ error: "Database Error" }); 
-    }
+        res.json({ success: true, message: "GB updated" });
+    } catch (error) { res.status(500).json({ error: "Database Error" }); }
 });
 
 module.exports = adminApp;
