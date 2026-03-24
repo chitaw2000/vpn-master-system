@@ -4,11 +4,10 @@ const axios = require('axios');
 const adminApp = express.Router();
 const Group = require('../models/Group');
 const User = require('../models/User');
-// const authenticateAPI = require('../middlewares/auth'); // လိုအပ်ပါက ပြန်ဖွင့်သုံးပါ
 require('dotenv').config();
 
 // ==========================================
-// 1. HOME DASHBOARD
+// 1. HOME DASHBOARD (Premium UI)
 // ==========================================
 adminApp.get('/', async (req, res) => {
     const groups = await Group.find({});
@@ -17,57 +16,80 @@ adminApp.get('/', async (req, res) => {
     for (const g of groups) {
         const userCount = await User.countDocuments({ groupName: g.name });
         groupsHtml += `
-        <div class="bg-white rounded-xl shadow-sm border p-6 flex flex-col justify-between hover:shadow-md transition">
-            <div>
-                <h3 class="text-xl font-bold text-gray-800 mb-2"><i class="fas fa-link text-indigo-500 mr-2"></i> ${g.name}</h3>
-                <p class="text-xs text-gray-400 mb-1">Master ID: <b class="text-gray-600">${g.masterGroupId}</b></p>
-                <p class="text-xs text-gray-400 mb-3">NS Record: <b class="text-indigo-600">${g.nsRecord || 'N/A'}</b></p>
-                <p class="text-sm text-gray-500 mb-4">Users: <b>${userCount}</b></p>
+        <div class="bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 border border-slate-100 overflow-hidden flex flex-col">
+            <div class="bg-gradient-to-r from-slate-800 to-slate-700 p-4 flex justify-between items-center">
+                <h3 class="text-lg font-bold text-white"><i class="fas fa-server text-indigo-400 mr-2"></i> ${g.name}</h3>
+                <form action="/admin/delete-group" method="POST" onsubmit="return confirm('⚠️ သတိပေးချက်: ဒီ Group နဲ့ အထဲက User တွေအကုန်လုံးကို ဖျက်မှာ သေချာပြီလား?');" class="m-0">
+                    <input type="hidden" name="groupName" value="${g.name}">
+                    <button type="submit" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition" title="Delete Group">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </form>
             </div>
-            <a href="/admin/group/${encodeURIComponent(g.name)}" class="text-center w-full bg-indigo-50 text-indigo-700 font-bold py-2 rounded-lg hover:bg-indigo-600 hover:text-white transition">ဝင်ရောက်မည် <i class="fas fa-arrow-right ml-1"></i></a>
+            <div class="p-5 flex-1">
+                <div class="flex items-center justify-between mb-3 border-b border-slate-50 pb-3">
+                    <span class="text-xs text-slate-400 font-semibold uppercase">Master ID</span>
+                    <span class="text-sm font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded-full">${g.masterGroupId}</span>
+                </div>
+                <div class="flex items-center justify-between mb-4">
+                    <span class="text-xs text-slate-400 font-semibold uppercase">Custom DNS</span>
+                    <span class="text-sm font-bold text-indigo-600 truncate max-w-[150px]" title="${g.nsRecord}">${g.nsRecord || 'N/A'}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-xs text-slate-400 font-semibold uppercase">Active Users</span>
+                    <span class="text-xl font-black text-slate-800">${userCount}</span>
+                </div>
+            </div>
+            <div class="p-4 bg-slate-50 border-t border-slate-100">
+                <a href="/admin/group/${encodeURIComponent(g.name)}" class="flex items-center justify-center w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 shadow-md transition">
+                    Manage Group <i class="fas fa-arrow-right ml-2"></i>
+                </a>
+            </div>
         </div>`;
     }
 
     let masterGroupsDropdown = '';
     try {
-        const response = await axios.get('http://178.128.55.202:8888/api/active-groups', {
-            headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' },
-            timeout: 5000 
-        });
+        const response = await axios.get('http://178.128.55.202:8888/api/active-groups', { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' }, timeout: 5000 });
         if (response.data && response.data.groups) {
-            response.data.groups.forEach(mg => {
-                masterGroupsDropdown += `<option value="${mg.id}">${mg.name} (${mg.serverCount} Nodes)</option>`;
-            });
+            response.data.groups.forEach(mg => { masterGroupsDropdown += `<option value="${mg.id}">${mg.name} (${mg.serverCount} Nodes)</option>`; });
         }
-    } catch (error) {
-        masterGroupsDropdown = `<option value="" disabled>Master Panel ချိတ်ဆက်မှု နှောင့်နှေးနေပါသည်</option>`;
-    }
+    } catch (error) { masterGroupsDropdown = `<option value="" disabled>Master Panel ချိတ်ဆက်မှု နှောင့်နှေးနေပါသည်</option>`; }
 
     res.send(`
         <!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
-        <body class="bg-gray-50 font-sans pb-10">
-            <nav class="bg-indigo-700 text-white shadow-md p-4 mb-8"><div class="max-w-6xl mx-auto font-bold text-xl"><i class="fas fa-shield-alt mr-2"></i> VPN Admin Panel</div></nav>
-            <div class="max-w-6xl mx-auto px-4">
-                <div class="bg-white p-5 rounded-xl shadow-sm border mb-8 flex gap-4 items-end">
-                    <div class="flex-1">
-                        <label class="block text-sm font-bold text-gray-700 mb-2">Create & Map New Group</label>
-                        <form action="/admin/create-group" method="POST" class="flex flex-wrap gap-4">
-                            <select name="masterGroupId" required class="w-full md:w-1/4 border p-3 rounded-lg outline-none bg-gray-50 focus:ring-2 focus:ring-indigo-500 text-sm">
-                                <option value="" disabled selected>Master Panel မှ Group ရွေးပါ...</option>
-                                ${masterGroupsDropdown}
-                            </select>
-                            <input type="text" name="nsRecord" placeholder="NS Record (e.g. ns.allsimmaha.me)" required class="w-full md:w-1/4 border p-3 rounded-lg outline-none bg-gray-50 focus:ring-2 focus:ring-indigo-500 text-sm">
-                            <input type="text" name="groupName" placeholder="Local Group Name..." required class="flex-1 border p-3 rounded-lg outline-none bg-gray-50 focus:ring-2 focus:ring-indigo-500 text-sm">
-                            <button type="submit" class="bg-green-600 text-white px-6 py-3 rounded-lg font-bold shadow-sm"><i class="fas fa-plus mr-2"></i> Create</button>
-                        </form>
-                    </div>
+        <body class="bg-slate-50 font-sans pb-10">
+            <nav class="bg-gradient-to-r from-indigo-800 to-indigo-600 text-white shadow-lg p-5 mb-8">
+                <div class="max-w-7xl mx-auto font-black text-2xl tracking-tight"><i class="fas fa-shield-alt mr-2 text-indigo-300"></i> PROXY <span class="text-indigo-200 font-light">ADMIN</span></div>
+            </nav>
+            <div class="max-w-7xl mx-auto px-4">
+                <div class="bg-white p-6 md:p-8 rounded-3xl shadow-lg border border-slate-100 mb-10">
+                    <label class="block text-lg font-black text-slate-800 mb-4 flex items-center"><i class="fas fa-layer-group text-indigo-500 mr-2"></i> Create New Group</label>
+                    <form action="/admin/create-group" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">1. Master Group</label>
+                            <select name="masterGroupId" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-semibold text-slate-700"><option value="" disabled selected>Select from Master...</option>${masterGroupsDropdown}</select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">2. Local Name</label>
+                            <input type="text" name="groupName" placeholder="e.g. VIP Gaming" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-slate-800">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">3. Custom DNS</label>
+                            <input type="text" name="nsRecord" placeholder="e.g. ns1.yourdomain.com" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-indigo-700">
+                        </div>
+                        <div class="flex items-end">
+                            <button type="submit" class="w-full bg-slate-800 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-black transition"><i class="fas fa-plus-circle mr-2"></i> Create</button>
+                        </div>
+                    </form>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">${groupsHtml || '<p class="text-gray-400">Group မရှိသေးပါ။</p>'}</div>
+                <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">${groupsHtml || `<p class="col-span-full text-center py-10 text-slate-500">No groups found.</p>`}</div>
             </div>
         </body></html>
     `);
 });
 
+// Group ဖန်တီးရန်
 adminApp.post('/create-group', async (req, res) => {
     try {
         if (req.body.groupName && req.body.masterGroupId && req.body.nsRecord) {
@@ -77,32 +99,44 @@ adminApp.post('/create-group', async (req, res) => {
     } catch (error) { res.status(500).send("Error creating group"); }
 });
 
+// 🌟 Group ဖျက်ရန်
+adminApp.post('/delete-group', async (req, res) => {
+    try {
+        await Group.deleteOne({ name: req.body.groupName });
+        await User.deleteMany({ groupName: req.body.groupName });
+        res.redirect('/admin');
+    } catch (error) { res.status(500).send("Error deleting group"); }
+});
+
 // ==========================================
-// 2. INSIDE GROUP VIEW
+// 2. INSIDE GROUP VIEW 
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
     const groupInfo = await Group.findOne({ name: groupName });
     const users = await User.find({ groupName: groupName });
+    
+    // 🌟 Group ရဲ့ DNS ကို လှမ်းယူမည်
     const domainName = (groupInfo && groupInfo.nsRecord) ? groupInfo.nsRecord : process.env.VPS_IP;
 
     let usersHtml = '';
     users.forEach((u, index) => {
         const link = `ssconf://${domainName}/${u.token}.json#VPN-${encodeURIComponent(u.name.replace(/\s+/g, ''))}`;
         const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
+        const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
+
         usersHtml += `
-        <tr class="border-b hover:bg-gray-50">
-            <td class="p-4 text-gray-500 font-bold">${index + 1}</td>
-            <td class="p-4"><div class="font-bold text-gray-800 text-base">${u.name}</div><div class="text-xs text-indigo-500 font-mono">Token: ${u.token}</div></td>
-            <td class="p-4 text-sm font-semibold text-gray-600"><span class="bg-gray-200 px-2 py-1 rounded text-xs">${serverCount} Nodes</span><br>${u.currentServer || 'None'}</td>
-            <td class="p-4 text-sm text-red-500 font-semibold"><i class="far fa-clock mr-1"></i> ${u.expireDate}</td>
-            <td class="p-4 font-bold text-gray-700">${u.usedGB} / ${u.totalGB} GB</td>
+        <tr class="border-b border-slate-50 hover:bg-indigo-50/30">
+            <td class="p-4 text-slate-400 font-bold">${index + 1}</td>
+            <td class="p-4"><div class="font-bold text-slate-800">${u.name}</div><div class="text-xs text-indigo-400 font-mono">${u.token}</div></td>
+            <td class="p-4"><span class="bg-slate-100 px-2 py-1 rounded text-xs font-bold mr-2">${serverCount} Nodes</span><span class="text-sm font-semibold">${u.currentServer || 'None'}</span></td>
+            <td class="p-4 text-sm font-bold text-slate-600">${u.expireDate}</td>
+            <td class="p-4 w-48"><div class="flex justify-between text-xs mb-1 font-bold"><span>${u.usedGB} GB</span><span>${u.totalGB} GB</span></div><div class="w-full bg-slate-100 rounded-full h-1.5"><div class="bg-indigo-500 h-1.5 rounded-full" style="width: ${usagePercent}%"></div></div></td>
             <td class="p-4 text-right flex justify-end gap-2">
-                <button id="btn-${u.token}" onclick="copyLink('${link}', 'btn-${u.token}')" class="bg-gray-800 text-white hover:bg-black px-3 py-2 rounded-lg text-xs font-bold transition"><i class="fas fa-copy"></i></button>
-                <form action="/admin/delete-user" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာပြီလား?');">
-                    <input type="hidden" name="token" value="${u.token}">
-                    <input type="hidden" name="groupName" value="${u.groupName}">
-                    <button type="submit" class="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-xs font-bold transition border border-red-200"><i class="fas fa-trash"></i></button>
+                <button id="btn-${u.token}" onclick="copyLink('${link}', 'btn-${u.token}')" class="bg-slate-100 text-slate-600 hover:bg-green-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition"><i class="fas fa-link"></i></button>
+                <form action="/admin/delete-user" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာပြီလား?');" class="m-0">
+                    <input type="hidden" name="token" value="${u.token}"><input type="hidden" name="groupName" value="${u.groupName}">
+                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition"><i class="fas fa-trash"></i></button>
                 </form>
             </td>
         </tr>`;
@@ -110,25 +144,27 @@ adminApp.get('/group/:name', async (req, res) => {
 
     res.send(`
         <!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
-        <body class="bg-gray-50 font-sans pb-10">
-            <nav class="bg-indigo-700 text-white shadow-md p-4 mb-6"><div class="max-w-6xl mx-auto flex items-center"><a href="/admin" class="hover:text-gray-300 mr-4 text-xl"><i class="fas fa-arrow-left"></i></a><span class="font-bold text-xl">${groupName} Management</span></div></nav>
-            <div class="max-w-6xl mx-auto px-4">
-                <div class="bg-white rounded-xl shadow-sm border p-6 mb-8">
-                    <form action="/admin/add-user" method="POST" class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <body class="bg-slate-50 font-sans pb-10">
+            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8">
+                <div class="max-w-7xl mx-auto flex items-center"><a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl"><i class="fas fa-arrow-left"></i></a><span class="font-black text-xl">${groupName}</span><span class="ml-3 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-100">DNS: ${domainName}</span></div>
+            </nav>
+            <div class="max-w-7xl mx-auto px-4">
+                <div class="bg-white rounded-2xl shadow-sm border p-6 mb-8">
+                    <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <input type="hidden" name="groupName" value="${groupName}">
-                        <input type="text" name="name" placeholder="User Name" required class="col-span-2 lg:col-span-1 border p-3 rounded-lg outline-none">
-                        <input type="number" name="totalGB" placeholder="Data Limit (GB)" required class="border p-3 rounded-lg outline-none">
-                        <input type="date" name="expireDate" required class="border p-3 rounded-lg outline-none">
-                        <button type="submit" class="col-span-2 lg:col-span-1 bg-blue-600 text-white rounded-lg font-bold shadow-sm"><i class="fas fa-plus mr-2"></i> Generate</button>
+                        <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold">
+                        <input type="number" name="totalGB" placeholder="Data Limit (GB)" required class="border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold">
+                        <input type="date" name="expireDate" required class="border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-slate-600">
+                        <button type="submit" class="bg-indigo-600 text-white rounded-xl py-3 font-bold hover:bg-indigo-700 transition">Generate Key</button>
                     </form>
                 </div>
-                <div class="bg-white rounded-xl shadow-sm border overflow-hidden"><table class="w-full text-left"><thead><tr class="bg-gray-100 text-xs uppercase text-gray-500"><th class="p-4 w-10">No</th><th class="p-4">User</th><th class="p-4">Active Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Action</th></tr></thead><tbody>${usersHtml}</tbody></table></div>
+                <div class="bg-white rounded-2xl shadow-sm border overflow-hidden"><table class="w-full text-left"><thead><tr class="bg-slate-100 text-xs uppercase text-slate-500"><th class="p-4">No</th><th class="p-4">User</th><th class="p-4">Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Actions</th></tr></thead><tbody>${usersHtml}</tbody></table></div>
             </div>
             <script>
                 function copyLink(link, btnId) {
                     var tempInput = document.createElement("input"); tempInput.value = link; document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
-                    var btn = document.getElementById(btnId); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.classList.replace('bg-gray-800', 'bg-green-600');
-                    setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy"></i>'; btn.classList.replace('bg-green-600', 'bg-gray-800'); }, 3000);
+                    var btn = document.getElementById(btnId); var orig = btn.innerHTML; btn.innerHTML = '<i class="fas fa-check"></i>'; btn.classList.add('bg-green-500', 'text-white');
+                    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('bg-green-500', 'text-white'); }, 2000);
                 }
             </script>
         </body></html>
@@ -136,27 +172,24 @@ adminApp.get('/group/:name', async (req, res) => {
 });
 
 // ==========================================
-// 3. GENERATE KEY API
+// 3. API ENDPOINTS
 // ==========================================
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
         const groupInfo = await Group.findOne({ name: groupName });
-        if (!groupInfo) return res.status(404).send("Group not found");
-
+        
         const masterResponse = await axios.post('http://178.128.55.202:8888/api/generate-keys', {
             masterGroupId: groupInfo.masterGroupId, userName: name, totalGB, expireDate
         }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
 
         if (masterResponse.data && masterResponse.data.keys) {
-            const keysFromMaster = masterResponse.data.keys;
             const token = crypto.randomBytes(16).toString('hex'); 
-            const defaultServer = Object.keys(keysFromMaster).length > 0 ? Object.keys(keysFromMaster)[0] : "None";
-
-            await User.create({ name, token, groupName, totalGB: Number(totalGB), usedGB: 0, currentServer: defaultServer, expireDate, accessKeys: keysFromMaster });
+            const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
+            await User.create({ name, token, groupName, totalGB: Number(totalGB), usedGB: 0, currentServer: defaultServer, expireDate, accessKeys: masterResponse.data.keys });
             res.redirect('/admin/group/' + encodeURIComponent(groupName));
-        } else { res.status(400).send("Master Panel မှ Key ပြန်မချပေးပါ။"); }
-    } catch (error) { res.status(500).send("Master Panel ချိတ်ဆက်မှု Error"); }
+        } else { res.status(400).send("Master Panel API Error"); }
+    } catch (error) { res.status(500).send("Error connecting to Master"); }
 });
 
 adminApp.post('/delete-user', async (req, res) => {
@@ -166,53 +199,35 @@ adminApp.post('/delete-user', async (req, res) => {
     } catch (error) { res.status(500).send("Error deleting user"); }
 });
 
-// ==========================================
-// 🌟 4. GB UPDATE API (Master မှ လှမ်းပို့ရမည်)
-// ==========================================
 adminApp.post('/update-gb-api', async (req, res) => {
     try {
         const { token, usedGB } = req.body;
-        if (!token || usedGB === undefined) return res.status(400).json({ error: "Missing data" });
-
         const user = await User.findOne({ token: token });
-        if (!user) return res.status(404).json({ error: "User not found" });
-
-        user.usedGB = Number(usedGB);
-        await user.save();
-
-        if (user.usedGB >= user.totalGB) {
-            try {
-                await axios.post('http://178.128.55.202:8888/api/user-action', { token: token, action: "suspend" }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
-            } catch (err) { console.error("Master သို့ ပိတ်ရန် အကြောင်းကြား၍ မရပါ။"); }
+        if (user) {
+            user.usedGB = Number(usedGB);
+            await user.save();
+            if (user.usedGB >= user.totalGB) {
+                try { await axios.post('http://178.128.55.202:8888/api/user-action', { token: token, action: "suspend" }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } }); } catch(e){}
+            }
         }
-        res.json({ success: true, message: "GB updated" });
-    } catch (error) { res.status(500).json({ error: "Database Error" }); }
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ error: "DB Error" }); }
 });
 
-// ==========================================
-// 🌟 5. MASTER ဘက်မှ SERVER အသစ် ထပ်ထည့်သောအခါ လက်ခံမည့် API (စောစောက ကျန်ခဲ့သော အပိုင်း)
-// ==========================================
 adminApp.post('/sync-new-server', async (req, res) => {
     try {
-        const { masterGroupId, newServerName, userKeys } = req.body;
-        if (!masterGroupId || !newServerName || !userKeys) return res.status(400).json({ error: "Missing data" });
-
+        const { newServerName, userKeys } = req.body;
         for (const [token, newOutlineKey] of Object.entries(userKeys)) {
             const user = await User.findOne({ token: token });
             if (user) {
                 user.accessKeys = { ...user.accessKeys, [newServerName]: newOutlineKey };
-                user.markModified('accessKeys'); 
-                await user.save();
-                await require('../config/redis').del(token); 
+                user.markModified('accessKeys'); await user.save(); await require('../config/redis').del(token); 
             }
         }
-        res.json({ success: true, message: `Server အသစ် ${newServerName} ထည့်သွင်းပြီးပါပြီ။` });
-    } catch (error) { res.status(500).json({ error: "Server Error during sync-new-server" }); }
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ error: "Error" }); }
 });
 
-// ==========================================
-// 🌟 6. MASTER တွင် ဆာဗာကျ၍ KEY/IP အသစ်ပြောင်းပါက လက်ခံမည့် API
-// ==========================================
 adminApp.post('/sync-updated-keys', async (req, res) => {
     try {
         const { serverName, updatedKeys } = req.body;
@@ -220,13 +235,11 @@ adminApp.post('/sync-updated-keys', async (req, res) => {
             const user = await User.findOne({ token: token });
             if (user && user.accessKeys) {
                 user.accessKeys[serverName] = newKeyData;
-                user.markModified('accessKeys');
-                await user.save();
-                await require('../config/redis').del(token); 
+                user.markModified('accessKeys'); await user.save(); await require('../config/redis').del(token); 
             }
         }
-        res.json({ success: true, message: `Keys updated for ${serverName}` });
-    } catch (error) { res.status(500).json({ error: "Error updating keys" }); }
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ error: "Error" }); }
 });
 
 module.exports = adminApp;
