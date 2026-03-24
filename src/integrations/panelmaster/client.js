@@ -5,17 +5,18 @@
 
 class PanelMasterClient {
     constructor() {
+        // Environment variables များမှတဆင့် URL နှင့် Key ကို ယူမည် (Hardcode မလုပ်ပါ)
         this.baseUrl = process.env.PANELMASTER_BASE_URL;
         this.apiKey = process.env.PANELMASTER_API_KEY;
         this.timeoutMs = parseInt(process.env.PANELMASTER_TIMEOUT_MS, 10) || 15000;
 
         if (!this.baseUrl || !this.apiKey) {
-            console.warn('⚠️ PANELMASTER_BASE_URL or PANELMASTER_API_KEY is not set.');
+            console.warn('⚠️ Warning: PANELMASTER_BASE_URL or PANELMASTER_API_KEY is missing in .env');
         }
     }
 
     /**
-     * Internal request handler with AbortController for timeouts
+     * Internal Core Request Handler (Timeout နှင့် Error Handling များပါဝင်သည်)
      */
     async _request(endpoint, options = {}) {
         const url = `${this.baseUrl}${endpoint}`;
@@ -36,17 +37,18 @@ class PanelMasterClient {
             });
 
             if (!response.ok) {
-                let errorMsg = `HTTP Error: ${response.status}`;
+                let errorMsg = `HTTP Error ${response.status} - ${response.statusText}`;
                 try {
                     const errorBody = await response.json();
                     errorMsg = errorBody.message || errorBody.error || errorMsg;
                 } catch {
-                    errorMsg = await response.text() || errorMsg;
+                    const textBody = await response.text();
+                    if (textBody) errorMsg = textBody;
                 }
                 throw new Error(`PanelMaster API Error: ${errorMsg}`);
             }
 
-            // Return JSON if present, otherwise empty object
+            // JSON Response ဖြစ်လျှင် Parse လုပ်မည်
             const contentType = response.headers.get('content-type');
             if (contentType && contentType.includes('application/json')) {
                 return await response.json();
@@ -54,7 +56,7 @@ class PanelMasterClient {
             return {};
         } catch (error) {
             if (error.name === 'AbortError') {
-                throw new Error(`PanelMaster API Request timed out after ${this.timeoutMs}ms`);
+                throw new Error(`PanelMaster Request timed out after ${this.timeoutMs}ms`);
             }
             throw error;
         } finally {
@@ -83,7 +85,7 @@ class PanelMasterClient {
     async userAction({ token, action }) {
         const validActions = ['suspend', 'resume', 'delete'];
         if (!validActions.includes(action)) {
-            throw new Error(`Invalid action. Must be one of: ${validActions.join(', ')}`);
+            throw new Error(`Invalid action: ${action}. Allowed: ${validActions.join(', ')}`);
         }
         return this._request('/api/user-action', {
             method: 'POST',
@@ -104,9 +106,10 @@ class PanelMasterClient {
     }
 
     async getUserConfig(token) {
+        // ဤ Endpoint သည် API Key မလိုပါ
         return this._request(`/conf/${token}.json`, { 
             method: 'GET',
-            requireApiKey: false // No x-api-key required for this endpoint
+            requireApiKey: false 
         });
     }
 }
