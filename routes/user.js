@@ -16,7 +16,7 @@ userApp.get('/panel/:token', async (req, res) => {
         
         if(!user) return res.status(404).send("User not found or Invalid Token!");
 
-        // Group ထဲက nsRecord ကို ရှာယူမည်
+        // 🌟 Group ရဲ့ DNS ကို လှမ်းယူမည်
         const group = await Group.findOne({ name: user.groupName });
         const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
 
@@ -32,10 +32,10 @@ userApp.get('/panel/:token', async (req, res) => {
         }
         dropdownOptions += `</optgroup>`;
 
-        // Outline App အတွက် ssconf လင့်ခ် (Port မပါဘဲ Domain သီးသန့်ဖြင့်)
+        // 🌟 DNS အမှန်ဖြင့် လင့်ခ်ထုတ်ပေးခြင်း
         const ssconfLink = `ssconf://${domainName}/${token}.json#VPN-${encodeURIComponent(user.name.replace(/\s+/g, ''))}`;
 
-        // 🌟 User Panel UI (ပြန်လည် ဖြန့်ကျက်ရေးသားထားပါသည်)
+        // 🌟 User Panel UI (ဖတ်ရလွယ်အောင် ပြန်လည် ဖြန့်ကျက်ရေးသားထားပါသည်)
         res.send(`
             <!DOCTYPE html>
             <html lang="en">
@@ -50,7 +50,9 @@ userApp.get('/panel/:token', async (req, res) => {
                 <div class="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md">
                     
                     <div class="text-center mb-6">
-                        <h2 class="text-2xl font-black text-gray-800"><i class="fas fa-shield-alt text-indigo-600 mr-2"></i>My VPN</h2>
+                        <h2 class="text-2xl font-black text-gray-800">
+                            <i class="fas fa-shield-alt text-indigo-600 mr-2"></i>My VPN
+                        </h2>
                         <p class="text-gray-500 mt-1">Hello, <b class="text-gray-800">${user.name}</b></p>
                     </div>
                     
@@ -67,7 +69,9 @@ userApp.get('/panel/:token', async (req, res) => {
                         <div class="w-full bg-gray-200 rounded-full h-2">
                             <div class="bg-indigo-500 h-2 rounded-full" style="width: ${(user.usedGB / user.totalGB) * 100}%"></div>
                         </div>
-                        <p class="text-xs text-center text-red-500 font-bold mt-3"><i class="far fa-clock"></i> Expire: ${user.expireDate}</p>
+                        <p class="text-xs text-center text-red-500 font-bold mt-3">
+                            <i class="far fa-clock"></i> Expire: ${user.expireDate}
+                        </p>
                     </div>
                     
                     <form action="/panel/change-server" method="POST">
@@ -76,7 +80,9 @@ userApp.get('/panel/:token', async (req, res) => {
                         <select name="newServer" class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 outline-none font-semibold text-gray-700">
                             ${dropdownOptions}
                         </select>
-                        <button type="submit" class="w-full bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-lg shadow transition">Switch Now</button>
+                        <button type="submit" class="w-full bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-lg shadow transition">
+                            Switch Now
+                        </button>
                     </form>
                     
                 </div>
@@ -109,19 +115,17 @@ userApp.get('/panel/:token', async (req, res) => {
 });
 
 // ==========================================
-// 2. CHANGE SERVER API & WEBHOOK
+// 2. CHANGE SERVER API (Webhook & Auto-fetch)
 // ==========================================
 userApp.post('/panel/change-server', async (req, res) => {
-    const { token, newServer } = req.body;
     try {
+        const { token, newServer } = req.body;
         const user = await User.findOne({ token: token });
         if (!user) return res.status(404).send("User not found");
 
-        // 🌟 အရေးကြီး: Key မရှိပါက Master Panel မှ လှမ်းဆွဲယူမည့် အပိုင်း
+        // Key မရှိလျှင် Master ဆီမှ လှမ်းတောင်းမည်
         if (!user.accessKeys || !user.accessKeys[newServer]) {
-            console.log(`🔍 Key missing for ${newServer}. Requesting update from Master...`);
             const groupInfo = await Group.findOne({ name: user.groupName });
-            
             if (groupInfo) {
                 try {
                     const masterResponse = await axios.post('http://178.128.55.202:8888/api/generate-keys', {
@@ -132,30 +136,27 @@ userApp.post('/panel/change-server', async (req, res) => {
                     }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
                     
                     if (masterResponse.data && masterResponse.data.keys) {
-                        user.accessKeys = masterResponse.data.keys;
+                        user.accessKeys = masterResponse.data.keys; 
                         user.markModified('accessKeys');
-                        console.log(`✅ Keys synced from Master for User: ${user.name}`);
                     }
                 } catch (err) { 
-                    console.error("❌ Key Sync Error"); 
+                    console.log("Key Sync Error"); 
                 }
             }
         }
 
-        // Database ကို Update လုပ်မည်
-        user.currentServer = newServer;
+        user.currentServer = newServer; 
         await user.save(); 
         await redisClient.del(token); 
 
-        // 🌟 Webhook အား API Key ဖြင့် Master သို့ လှမ်းပို့မည်
+        // Webhook လှမ်းပို့မည်
         try {
             await axios.post('http://178.128.55.202:8888/api/webhook/switch', { 
                 token: token, 
                 activeServer: newServer 
             }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
-            console.log(`✅ Webhook Sent: User switched to ${newServer}`);
-        } catch (webhookError) { 
-            console.error("❌ Webhook Failed"); 
+        } catch (err) { 
+            console.log("Webhook Error"); 
         }
 
         res.redirect('/panel/' + token);
@@ -165,37 +166,34 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // ==========================================
-// 3. OUTLINE APP JSON ENDPOINT (Format Formatting)
+// 3. OUTLINE APP JSON ENDPOINT
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
-    const token = req.params.token;
     try {
-        // Cache စစ်ဆေးခြင်း
+        const token = req.params.token;
+        
+        // Redis Cache
         const cachedKey = await redisClient.get(token);
-        if (cachedKey) {
+        if (cachedKey) { 
             try { 
                 return res.json(JSON.parse(cachedKey)); 
             } catch (e) { 
                 await redisClient.del(token); 
-            }
+            } 
         }
         
-        // Database မှ ရှာဖွေခြင်း
         const user = await User.findOne({ token: token });
         if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
             let rawConfig = user.accessKeys[user.currentServer];
             
-            // String အနေဖြင့် ဝင်လာပါက Object သို့ ပြောင်းမည်
             if (typeof rawConfig === 'string' && rawConfig.startsWith('{')) { 
                 try { rawConfig = JSON.parse(rawConfig); } catch(e){} 
             }
-            
-            // ss:// အဟောင်းပုံစံများအတွက် Fallback
             if (typeof rawConfig === 'string' && rawConfig.startsWith('ss://')) { 
                 return res.json({ server: rawConfig }); 
             }
 
-            // 🌟 Outline App ဖတ်နိုင်ရန် အတိအကျ အစီအစဉ် ပြန်စီခြင်း
+            // 🌟 Outline App လိုအပ်သော အစီအစဉ်အတိုင်း တိကျစွာ ပြန်စီမည်
             if (typeof rawConfig === 'object' && rawConfig.server) {
                 rawConfig = { 
                     server: rawConfig.server, 
@@ -206,14 +204,11 @@ userApp.get('/:token.json', async (req, res) => {
                 };
             }
             
-            // ပြင်ဆင်ပြီးသော Data အား Cache တွင် ၅ မိနစ် သိမ်းမည်
             await redisClient.setEx(token, 300, JSON.stringify(rawConfig));
             return res.json(rawConfig);
         }
-        
         res.status(404).json({ error: "Configuration Not Found" });
     } catch (error) { 
-        console.error("❌ JSON Endpoint Error:", error.message);
         res.status(500).json({ error: "System Error" }); 
     }
 });
