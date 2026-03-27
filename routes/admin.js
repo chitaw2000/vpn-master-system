@@ -99,7 +99,6 @@ adminApp.post('/create-group', async (req, res) => {
 
 adminApp.post('/delete-group', async (req, res) => {
     try {
-        // Group ဖျက်လျှင် အထဲက User တွေကို Master ဆီမှာပါ လိုက်ဖျက်မည်
         const users = await User.find({ groupName: req.body.groupName });
         for (const u of users) {
             try { await axios.post('http://168.144.33.53:8888/api/user-action', { token: u.token, action: "delete" }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } }); } catch(e){}
@@ -111,21 +110,23 @@ adminApp.post('/delete-group', async (req, res) => {
 });
 
 // ==========================================
-// 2. INSIDE GROUP VIEW
+// 2. INSIDE GROUP VIEW (Features Added Here!)
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
     const groupInfo = await Group.findOne({ name: groupName });
     const users = await User.find({ groupName: groupName });
     
-    const domainName = (groupInfo && groupInfo.nsRecord) ? groupInfo.nsRecord : process.env.VPS_IP;
-    const currentHost = req.get('host'); // ဆာဗာရဲ့ လက်ရှိ Domain/IP
+    const domainName = (groupInfo && groupInfo.nsRecord) ? groupInfo.nsRecord : (process.env.VPS_IP || req.hostname);
+    
+    // Panel Link အတွက် IP (သို့) Domain ယူခြင်း
+    const panelHost = process.env.VPS_IP || req.hostname;
 
     let usersHtml = '';
     users.forEach((u, index) => {
-        // 🌟 Link ၂ မျိုး (SSCONF အတွက် နှင့် User ဝင်ရမည့် Web Panel အတွက်)
+        // 🌟 Link ၂ မျိုး (SSCONF နှင့် User Panel)
         const ssconfLink = `ssconf://${domainName}/${u.token}.json#VPN-${encodeURIComponent(u.name.replace(/\s+/g, ''))}`;
-        const webPanelLink = `http://${currentHost}/panel/${u.token}`; 
+        const webPanelLink = `http://${panelHost}/panel/${u.token}`; 
         
         const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
         const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
@@ -136,10 +137,18 @@ adminApp.get('/group/:name', async (req, res) => {
             <td class="p-4"><div class="font-bold text-slate-800">${u.name}</div><div class="text-xs text-indigo-400 font-mono">${u.token}</div></td>
             <td class="p-4"><span class="bg-slate-100 px-2 py-1 rounded text-xs font-bold mr-2">${serverCount} Nodes</span><span class="text-sm font-semibold">${u.currentServer || 'None'}</span></td>
             <td class="p-4 text-sm font-bold text-slate-600">${u.expireDate}</td>
-            <td class="p-4 w-48"><div class="flex justify-between text-xs mb-1 font-bold"><span>${u.usedGB} GB</span><span>${u.totalGB} GB</span></div><div class="w-full bg-slate-100 rounded-full h-1.5"><div class="bg-indigo-500 h-1.5 rounded-full" style="width: ${usagePercent}%"></div></div></td>
+            <td class="p-4 w-48">
+                <div class="flex justify-between text-xs mb-1 font-bold">
+                    <span class="text-indigo-600">${u.usedGB} GB</span>
+                    <span class="text-slate-500">${u.totalGB} GB</span>
+                </div>
+                <div class="w-full bg-slate-200 rounded-full h-1.5">
+                    <div class="bg-indigo-500 h-1.5 rounded-full" style="width: ${usagePercent}%"></div>
+                </div>
+            </td>
             <td class="p-4 text-right flex justify-end gap-2">
                 
-                <button id="panelBtn-${u.token}" onclick="copyLink('${webPanelLink}', 'panelBtn-${u.token}', '<i class=\\'fas fa-globe\\'></i>')" class="bg-indigo-50 text-indigo-600 hover:bg-indigo-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy User Panel Link">
+                <button id="panelBtn-${u.token}" onclick="copyLink('${webPanelLink}', 'panelBtn-${u.token}', '<i class=\\'fas fa-globe\\'></i>')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy Web Panel Link">
                     <i class="fas fa-globe"></i>
                 </button>
 
@@ -147,9 +156,12 @@ adminApp.get('/group/:name', async (req, res) => {
                     <i class="fas fa-link"></i>
                 </button>
                 
-                <form action="/admin/delete-user" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာပြီလား? Master Panel မှာပါ ပျက်သွားပါမည်။');" class="m-0">
-                    <input type="hidden" name="token" value="${u.token}"><input type="hidden" name="groupName" value="${u.groupName}">
-                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition"><i class="fas fa-trash"></i></button>
+                <form action="/admin/delete-user" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာပြီလား? Master Panel မှာပါ အပြီးအပိုင် ပျက်သွားပါမည်။');" class="m-0">
+                    <input type="hidden" name="token" value="${u.token}">
+                    <input type="hidden" name="groupName" value="${u.groupName}">
+                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Delete User">
+                        <i class="fas fa-trash"></i>
+                    </button>
                 </form>
             </td>
         </tr>`;
@@ -185,7 +197,7 @@ adminApp.get('/group/:name', async (req, res) => {
 });
 
 // ==========================================
-// 3. API ENDPOINTS (Add, Delete, Webhook)
+// 3. API ENDPOINTS
 // ==========================================
 adminApp.post('/add-user', async (req, res) => {
     try {
@@ -209,13 +221,13 @@ adminApp.post('/delete-user', async (req, res) => {
     try {
         const token = req.body.token;
 
-        // 🌟 ၁။ Master Panel ဘက်မှာ အရင်သွားဖျက်မည် (API Integration)
+        // 🌟 ၁။ Master Panel ဘက်မှာ အရင်သွားဖျက်မည်
         try {
             await axios.post('http://168.144.33.53:8888/api/user-action', { 
                 token: token, 
                 action: "delete" 
             }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
-        } catch(e) { console.log("Master Panel Delete API Failed"); }
+        } catch(e) { console.log("Master Delete Failed"); }
 
         // ၂။ Local DB မှာ ဖျက်မည်
         await User.deleteOne({ token: token });
@@ -226,7 +238,6 @@ adminApp.post('/delete-user', async (req, res) => {
 // ==========================================
 // 🌟 4. RECEIVE GB FROM MASTER PANEL (WEBHOOK)
 // ==========================================
-// Master Panel က ဒီလမ်းကြောင်းကို လှမ်းပြီး POST လုပ်ပါလိမ့်မယ်
 adminApp.post('/api/receive-gb', async (req, res) => {
     try {
         // Master ဆီကလာတဲ့ API Key ကို စစ်ဆေးရန်
@@ -244,9 +255,9 @@ adminApp.post('/api/receive-gb', async (req, res) => {
         if (user) {
             user.usedGB = Number(usedGB);
             await user.save();
-            return res.json({ success: true, message: "GB Updated in Sub-Panel Successfully" });
+            return res.json({ success: true, message: "GB Updated" });
         } else {
-            return res.status(404).json({ error: "User token not found in Sub-Panel" });
+            return res.status(404).json({ error: "User token not found" });
         }
     } catch (error) { 
         res.status(500).json({ error: "Server Error" }); 
