@@ -12,7 +12,6 @@ userApp.get('/panel/:token', async (req, res) => {
     try {
         const token = req.params.token;
         const user = await User.findOne({ token: token });
-        
         if(!user) return res.status(404).send("User not found or Invalid Token!");
 
         const group = await Group.findOne({ name: user.groupName });
@@ -25,14 +24,14 @@ userApp.get('/panel/:token', async (req, res) => {
                 const isSelected = user.currentServer === serverName ? 'selected' : '';
                 dropdownOptions += `<option value="${serverName}" ${isSelected}>${serverName}</option>`;
             });
-        } else {
-            dropdownOptions += `<option disabled>Master Panel မှ Key မပို့သေးပါ</option>`;
+        } else { 
+            dropdownOptions += `<option disabled>No Nodes Available</option>`; 
         }
         dropdownOptions += `</optgroup>`;
 
         const ssconfLink = `ssconf://${domainName}/${token}.json#VPN-${encodeURIComponent(user.name.replace(/\s+/g, ''))}`;
 
-        // 🌟 HTML ကို သေချာစွာ ပြန်လည်ဖြန့်ကျက်ရေးသားထားပါသည်
+        // 🌟 HTML များကို ရှင်းလင်းစွာ ပြန်လည်ဖြန့်ကျက်ထားပါသည်
         res.send(`
             <!DOCTYPE html>
             <html lang="en">
@@ -106,9 +105,7 @@ userApp.get('/panel/:token', async (req, res) => {
             </body>
             </html>
         `);
-    } catch (error) { 
-        res.status(500).send("System Error Viewing Panel"); 
-    }
+    } catch (error) { res.status(500).send("System Error Viewing Panel"); }
 });
 
 // ==========================================
@@ -120,29 +117,29 @@ userApp.post('/panel/change-server', async (req, res) => {
         const user = await User.findOne({ token: token });
         if (!user) return res.status(404).send("User not found");
 
+        const groupInfo = await Group.findOne({ name: user.groupName });
+        if (!groupInfo) return res.status(404).send("Group Configuration Error");
+
+        // Key မရှိသေးရင် Master ဆီက လှမ်းတောင်းမည် (Dynamic IP & Key)
         if (!user.accessKeys || !user.accessKeys[newServer]) {
-            const groupInfo = await Group.findOne({ name: user.groupName });
-            if (groupInfo) {
-                try {
-                    // 🌟 Master API Key ပြင်ရန်
-                    const masterResponse = await axios.post('http://168.144.33.53:8888/api/generate-keys', {
-                        masterGroupId: groupInfo.masterGroupId, userName: user.name, totalGB: user.totalGB, expireDate: user.expireDate
-                    }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
-                    
-                    if (masterResponse.data && masterResponse.data.keys) {
-                        user.accessKeys = masterResponse.data.keys; user.markModified('accessKeys');
-                    }
-                } catch (err) { console.log("Key Sync Error"); }
-            }
+            try {
+                const masterResponse = await axios.post(groupInfo.masterIp + '/api/generate-keys', {
+                    masterGroupId: groupInfo.masterGroupId, userName: user.name, totalGB: user.totalGB, expireDate: user.expireDate
+                }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
+                
+                if (masterResponse.data && masterResponse.data.keys) {
+                    user.accessKeys = masterResponse.data.keys; user.markModified('accessKeys');
+                }
+            } catch (err) { console.log("Key Sync Error"); }
         }
 
         user.currentServer = newServer; await user.save(); await redisClient.del(token); 
 
+        // Master ဆီသို့ Switch Server သတင်းပို့မည် (Dynamic IP & Key)
         try {
-            // 🌟 Master API Key ပြင်ရန်
-            await axios.post('http://168.144.33.53:8888/api/webhook/switch', { 
+            await axios.post(groupInfo.masterIp + '/api/webhook/switch', { 
                 token: token, activeServer: newServer 
-            }, { headers: { 'x-api-key': 'My_Super_Secret_VPN_Key_2026' } });
+            }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
         } catch (err) { console.log("Webhook Error"); }
 
         res.redirect('/panel/' + token);
