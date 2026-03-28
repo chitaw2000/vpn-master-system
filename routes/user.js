@@ -43,7 +43,7 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
 });
 
 // ==========================================
-// 2. USER WEB PANEL (PREMIUM UI WITH EXPIRE ALERT)
+// 2. USER WEB PANEL (PREMIUM UI)
 // ==========================================
 userApp.get('/panel/:token', async (req, res) => {
     try {
@@ -106,17 +106,15 @@ userApp.get('/panel/:token', async (req, res) => {
 
         const usagePercent = user.totalGB > 0 ? ((user.usedGB / user.totalGB) * 100).toFixed(1) : 0;
         const isGbFull = user.usedGB >= user.totalGB;
-        // အကယ်၍ GB ပြည့်နေပါက အနီရောင်ဖြင့် ပြမည်
         const progressColor = isGbFull ? 'from-red-600 to-red-500 shadow-[0_0_15px_rgba(239,68,68,0.6)]' : 'from-indigo-600 via-indigo-500 to-purple-500 shadow-[0_0_15px_rgba(99,102,241,0.6)]';
 
         const logoUrl = "https://i.postimg.cc/G2FPpD7C/QUITO-profile-1.png"; 
         const outlineIconUrl = "https://i.postimg.cc/rm7q3wKz/images-(23).jpg";
 
-        // 🌟 Panel အောက်ပိုင်း (Expired ဖြစ်လျှင် Alert ပြမည်၊ မဖြစ်လျှင် Server များကို ပြမည်) 🌟
-        let lowerSectionHtml = '';
-
+        // Expired Alert Card
+        let alertCardHtml = '';
         if (isExpired) {
-            lowerSectionHtml = `
+            alertCardHtml = `
                 <div class="bg-red-500/10 border border-red-500/50 rounded-3xl p-6 mb-6 text-center shadow-[0_0_30px_rgba(239,68,68,0.15)] relative overflow-hidden">
                     <div class="absolute top-0 right-0 w-32 h-32 bg-red-500/20 rounded-full blur-3xl -mr-10 -mt-10"></div>
                     <div class="relative z-10">
@@ -135,30 +133,6 @@ userApp.get('/panel/:token', async (req, res) => {
                                 <i class="fab fa-telegram-plane text-lg"></i> Telegram
                             </a>
                         </div>
-                    </div>
-                </div>
-            `;
-        } else {
-            lowerSectionHtml = `
-                <div class="mb-3">
-                    <a href="${ssconfLink}" class="w-full bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-4 px-2 rounded-2xl flex items-center justify-center gap-3 transition active:scale-[0.98] shadow-md">
-                        <img src="${outlineIconUrl}" class="w-6 h-6 rounded object-cover shadow-sm">
-                        <span class="tracking-wide text-[15px]">Connect with Outline</span>
-                    </a>
-                </div>
-
-                <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-[0_6px_20px_rgba(79,70,229,0.35)] mb-8 transition-all active:scale-[0.98] flex justify-center items-center gap-2.5 uppercase tracking-wider text-sm">
-                    <i class="fas fa-copy text-lg"></i> Copy Subscription Link
-                </button>
-
-                <h3 class="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 ml-2">Available Servers</h3>
-                
-                <div class="bg-[#151f32] rounded-3xl overflow-hidden shadow-xl border border-slate-800">
-                    <div class="bg-slate-800/30 p-4 text-[13px] font-bold text-slate-300 border-b border-slate-800 flex items-center gap-2">
-                        <i class="fas fa-network-wired text-indigo-500"></i> Node Group: ${user.groupName}
-                    </div>
-                    <div class="flex flex-col">
-                        ${nodesListHtml}
                     </div>
                 </div>
             `;
@@ -220,7 +194,29 @@ userApp.get('/panel/:token', async (req, res) => {
                         </div>
                     </div>
 
-                    ${lowerSectionHtml}
+                    ${alertCardHtml}
+
+                    <div class="mb-3">
+                        <a href="${ssconfLink}" class="w-full bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-4 px-2 rounded-2xl flex items-center justify-center gap-3 transition active:scale-[0.98] shadow-md">
+                            <img src="${outlineIconUrl}" class="w-6 h-6 rounded object-cover shadow-sm">
+                            <span class="tracking-wide text-[15px]">Connect with Outline</span>
+                        </a>
+                    </div>
+
+                    <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-[0_6px_20px_rgba(79,70,229,0.35)] mb-8 transition-all active:scale-[0.98] flex justify-center items-center gap-2.5 uppercase tracking-wider text-sm">
+                        <i class="fas fa-copy text-lg"></i> Copy Subscription Link
+                    </button>
+
+                    <h3 class="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 ml-2">Available Servers</h3>
+                    
+                    <div class="bg-[#151f32] rounded-3xl overflow-hidden shadow-xl border border-slate-800">
+                        <div class="bg-slate-800/30 p-4 text-[13px] font-bold text-slate-300 border-b border-slate-800 flex items-center gap-2">
+                            <i class="fas fa-network-wired text-indigo-500"></i> Node Group: ${user.groupName}
+                        </div>
+                        <div class="flex flex-col">
+                            ${nodesListHtml}
+                        </div>
+                    </div>
 
                 </div>
                 
@@ -395,14 +391,6 @@ userApp.post('/panel/change-server', async (req, res) => {
         
         if (!user) return res.status(404).send("User not found");
         
-        // 🌟 Prevent Changing Server if Expired
-        const today = new Date();
-        today.setHours(0, 0, 0, 0); 
-        const expDate = new Date(user.expireDate);
-        if (user.usedGB >= user.totalGB || today > expDate) {
-            return res.status(403).send("Account Expired. You cannot change server.");
-        }
-        
         const groupInfo = await Group.findOne({ name: user.groupName });
         if (!groupInfo) return res.status(404).send("Group Error");
 
@@ -445,7 +433,7 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // ==========================================
-// 4. OUTLINE SUBSCRIPTION API (WITH JSON ERROR RESPONSE)
+// 4. OUTLINE SUBSCRIPTION API (WITH 401 JSON ERROR RESPONSE)
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
     try {
@@ -460,7 +448,7 @@ userApp.get('/:token.json', async (req, res) => {
         const expDate = new Date(user.expireDate);
         const isExpired = user.usedGB >= user.totalGB || today > expDate;
 
-        // အကယ်၍ Expired ဖြစ်ပါက (သို့) GB ပြည့်ပါက Outline တွင် Error Message တန်းပေါ်စေမည်
+        // 🌟🌟 FIXED: Outline Native JSON Error (Status 401) 🌟🌟
         if (isExpired) {
             const errorJson = {
                 "error": {
@@ -469,7 +457,7 @@ userApp.get('/:token.json', async (req, res) => {
                 }
             };
             
-            // Call Webhook to ensure master blocks the key (Fire and Forget)
+            // Webhook to ensure master blocks the key
             try {
                 const groupInfo = await Group.findOne({ name: user.groupName });
                 if (groupInfo && groupInfo.masterIp) {
@@ -480,7 +468,8 @@ userApp.get('/:token.json', async (req, res) => {
                 }
             } catch (e) {}
 
-            return res.status(400).json(errorJson);
+            // 🌟 Return 401 Unauthorized so Outline natively parses the Error JSON
+            return res.status(401).json(errorJson); 
         }
 
         // --- Expired မဖြစ်ပါက ပုံမှန်အတိုင်း Key ပေးမည် ---
