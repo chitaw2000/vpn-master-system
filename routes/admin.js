@@ -238,7 +238,7 @@ adminApp.post('/add-master', async (req, res) => {
         await Master.create({ name, ip, apiKey }); 
         res.redirect('/admin'); 
     } catch (e) { 
-        res.status(500).send("Error saving Master."); 
+        res.status(500).send("Error saving Master. Name might be duplicate."); 
     }
 });
 
@@ -405,32 +405,22 @@ adminApp.get('/group/:name', async (req, res) => {
             <div class="max-w-7xl mx-auto px-4">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border p-6">
-                        <label class="block text-sm font-black text-slate-800 mb-4">
-                            <i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key
-                        </label>
+                        <label class="block text-sm font-black text-slate-800 mb-4"><i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key</label>
                         <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-3">
                             <input type="hidden" name="groupName" value="${groupName}">
                             <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
                             <input type="number" name="totalGB" placeholder="Data (GB)" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
                             <input type="date" name="expireDate" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-600">
-                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">
-                                Create
-                            </button>
+                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">Create</button>
                         </form>
                     </div>
 
                     <div class="bg-yellow-50 rounded-2xl shadow-sm border border-yellow-200 p-6">
-                        <label class="block text-sm font-black text-yellow-800 mb-2">
-                            <i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection
-                        </label>
+                        <label class="block text-sm font-black text-yellow-800 mb-2"><i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection</label>
                         <form action="/admin/update-group-master" method="POST" class="flex flex-col gap-2">
                             <input type="hidden" name="groupName" value="${groupName}">
-                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">
-                                ${relinkOptions}
-                            </select>
-                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">
-                                Re-Link Master
-                            </button>
+                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">${relinkOptions}</select>
+                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">Re-Link Master</button>
                         </form>
                     </div>
                 </div>
@@ -439,38 +429,19 @@ adminApp.get('/group/:name', async (req, res) => {
                     <table class="w-full text-left">
                         <thead>
                             <tr class="bg-slate-100 text-xs uppercase text-slate-500">
-                                <th class="p-4">ID</th>
-                                <th class="p-4">User</th>
-                                <th class="p-4">Node</th>
-                                <th class="p-4">Expire</th>
-                                <th class="p-4">Usage</th>
-                                <th class="p-4 text-right">Actions</th>
+                                <th class="p-4">ID</th><th class="p-4">User</th><th class="p-4">Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            ${usersHtml}
-                        </tbody>
+                        <tbody>${usersHtml}</tbody>
                     </table>
                 </div>
             </div>
 
             <script>
                 function copyLink(link, btnId, origHtml) {
-                    var tempInput = document.createElement("input"); 
-                    tempInput.value = link; 
-                    document.body.appendChild(tempInput); 
-                    tempInput.select(); 
-                    document.execCommand("copy"); 
-                    document.body.removeChild(tempInput);
-                    
-                    var btn = document.getElementById(btnId); 
-                    btn.innerHTML = '<i class="fas fa-check"></i>'; 
-                    btn.classList.add('bg-green-500', 'text-white');
-                    
-                    setTimeout(() => { 
-                        btn.innerHTML = origHtml; 
-                        btn.classList.remove('bg-green-500', 'text-white'); 
-                    }, 2000);
+                    var tempInput = document.createElement("input"); tempInput.value = link; document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
+                    var btn = document.getElementById(btnId); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.classList.add('bg-green-500', 'text-white');
+                    setTimeout(() => { btn.innerHTML = origHtml; btn.classList.remove('bg-green-500', 'text-white'); }, 2000);
                 }
             </script>
         </body>
@@ -535,7 +506,7 @@ adminApp.post('/update-group-master', async (req, res) => {
     }
 });
 
-// 🌟 ADD USER LOGIC (HIDDIFY TOKEN FIX INCLUDED)
+// 🌟 ADD USER LOGIC (CAPITAL LETTER TOKEN FIX INCLUDED)
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
@@ -552,8 +523,9 @@ adminApp.post('/add-user', async (req, res) => {
 
         if (masterResponse.data && masterResponse.data.keys) {
             
-            // 🌟🌟 HIDDIFY FIX: Token must ALWAYS start with a random letter (a-z) 🌟🌟
-            const randomLetter = String.fromCharCode(97 + Math.floor(Math.random() * 26)); // Random letter a-z
+            // 🌟🌟 HIDDIFY FIX: Token must ALWAYS start with a random UPPERCASE letter (A-Z) 🌟🌟
+            // 65 is 'A' in ASCII. 65 + random(0-25) gives A to Z
+            const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26)); 
             const token = randomLetter + crypto.randomBytes(15).toString('hex'); 
             
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
