@@ -525,7 +525,7 @@ adminApp.post('/update-group-master', async (req, res) => {
     }
 });
 
-// 🌟 ADD USER LOGIC (FIXED: EXACTLY 32 CHARACTERS FOR HIDDIFY)
+// 🌟 ADD USER LOGIC (THE ULTIMATE HIDDIFY UUID FIX)
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
@@ -542,18 +542,22 @@ adminApp.post('/add-user', async (req, res) => {
 
         if (masterResponse.data && masterResponse.data.keys) {
             
-            // 🌟🌟 THE ULTIMATE FIX: EXACTLY 32 CHARACTERS (1 Letter + 31 Hex Digits) 🌟🌟
-            // Hiddify strictly validates UUID length (32 chars without hyphens).
+            // 🌟🌟 THE ULTIMATE HIDDIFY FIX: EXACTLY 32 HEX CHARACTERS 🌟🌟
+            // Hiddify strictly validates UUID format (Hexadecimal characters only). 
+            // 'g' through 'z' are completely INVALID in hex.
             
-            // 1. Generate a random UPPERCASE letter (A-Z)
-            const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26)); 
+            // 1. Choose a valid hex letter (a-f) for the first character
+            const hexLetters = 'abcdef';
+            const firstChar = hexLetters[Math.floor(Math.random() * 6)];
             
-            // 2. Generate 16 bytes of random hex (which is exactly 32 characters long)
-            const randomHex = crypto.randomBytes(16).toString('hex'); 
+            // 2. Choose a valid hex letter (a-f) for the last character (matching user's observation)
+            const lastChar = hexLetters[Math.floor(Math.random() * 6)];
             
-            // 3. Combine them: We take the 1 uppercase letter, and attach the LAST 31 characters of the hex string.
-            // Result: Exactly 32 characters total. Always starts with a letter.
-            const token = randomLetter + randomHex.substring(1); 
+            // 3. Generate exactly 30 characters of random hex in the middle (15 bytes = 30 hex chars)
+            const middleChars = crypto.randomBytes(15).toString('hex'); 
+            
+            // 4. Final Token: 1 + 30 + 1 = 32 characters exactly. All valid hex format.
+            const token = firstChar + middleChars + lastChar; 
             
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
             await User.create({ 
