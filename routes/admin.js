@@ -5,6 +5,7 @@ const adminApp = express.Router();
 const Group = require('../models/Group');
 const User = require('../models/User');
 const Master = require('../models/Master');
+const redisClient = require('../config/redis');
 
 // 🌟 Exponential Backoff Retry Function
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
@@ -105,7 +106,6 @@ adminApp.get('/', async (req, res) => {
             </nav>
 
             <div class="max-w-7xl mx-auto px-4">
-                
                 <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-8 flex flex-col md:flex-row gap-6">
                     <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
                         <label class="block text-lg font-black text-slate-800 mb-4">
@@ -303,7 +303,7 @@ adminApp.post('/delete-group', async (req, res) => {
 });
 
 // ==========================================
-// 2. INSIDE GROUP VIEW
+// 2. INSIDE GROUP VIEW (WITH EDIT MODAL)
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
@@ -316,7 +316,7 @@ adminApp.get('/group/:name', async (req, res) => {
 
     let usersHtml = '';
     users.forEach((u) => {
-        const ssconfLink = `ssconf://${domainName}/${u.token}.json#VPN-${encodeURIComponent(u.name.replace(/\s+/g, ''))}`;
+        const ssconfLink = `ssconf://${domainName}/${u.token}.json#QitoVPN_${encodeURIComponent(u.name.replace(/\s+/g, ''))}`;
         const webPanelLink = `http://${panelHost}/panel/${u.token}`; 
         const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
         const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
@@ -349,10 +349,15 @@ adminApp.get('/group/:name', async (req, res) => {
                 <button id="btn-${u.token}" onclick="copyLink('${ssconfLink}', 'btn-${u.token}', '<i class=\\'fas fa-link\\'></i>')" class="bg-slate-100 text-slate-600 hover:bg-green-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy SSCONF Link">
                     <i class="fas fa-link"></i>
                 </button>
+                
+                <button onclick="openEditModal('${u.token}', '${u.totalGB}', '${u.expireDate}')" class="bg-yellow-50 text-yellow-600 hover:bg-yellow-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Edit User">
+                    <i class="fas fa-edit"></i>
+                </button>
+
                 <form action="/admin/delete-user" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာပြီလား?');" class="m-0">
                     <input type="hidden" name="token" value="${u.token}">
                     <input type="hidden" name="groupName" value="${u.groupName}">
-                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition">
+                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Delete User">
                         <i class="fas fa-trash"></i>
                     </button>
                 </form>
@@ -444,7 +449,58 @@ adminApp.get('/group/:name', async (req, res) => {
                 </div>
             </div>
 
+            <div id="editModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 backdrop-blur-sm transition-opacity">
+                <div class="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100">
+                    <div class="flex justify-between items-center mb-5 border-b border-slate-100 pb-3">
+                        <h3 class="text-lg font-black text-slate-800"><i class="fas fa-user-edit text-indigo-500 mr-2"></i> Edit User Data</h3>
+                        <button onclick="closeEditModal()" class="text-slate-400 hover:text-red-500 transition"><i class="fas fa-times text-xl"></i></button>
+                    </div>
+                    <form action="/admin/edit-user" method="POST" class="flex flex-col gap-4">
+                        <input type="hidden" name="groupName" value="${groupName}">
+                        <input type="hidden" name="oldToken" id="editOldToken">
+                        
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Token (Link ID)</label>
+                            <input type="text" name="newToken" id="editNewToken" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-mono text-sm text-slate-700 bg-slate-50">
+                        </div>
+                        <div class="flex gap-3">
+                            <div class="flex-1">
+                                <label class="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Total GB</label>
+                                <input type="number" name="newTotalGB" id="editTotalGB" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-700">
+                            </div>
+                            <div class="flex-1">
+                                <label class="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Expire Date</label>
+                                <input type="date" name="newExpireDate" id="editExpireDate" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-700">
+                            </div>
+                        </div>
+                        <div class="flex gap-3 mt-4 pt-4 border-t border-slate-100">
+                            <button type="button" onclick="closeEditModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition">Cancel</button>
+                            <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition shadow-[0_4px_14px_rgba(79,70,229,0.4)]">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
             <script>
+                // Form interactions
+                function openEditModal(token, gb, expire) {
+                    document.getElementById('editOldToken').value = token;
+                    document.getElementById('editNewToken').value = token;
+                    document.getElementById('editTotalGB').value = gb;
+                    document.getElementById('editExpireDate').value = expire;
+                    
+                    const modal = document.getElementById('editModal');
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                }
+
+                function closeEditModal() {
+                    const modal = document.getElementById('editModal');
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                }
+
+                // Copy logic
                 function copyLink(link, btnId, origHtml) {
                     var tempInput = document.createElement("input"); 
                     tempInput.value = link; 
@@ -466,6 +522,36 @@ adminApp.get('/group/:name', async (req, res) => {
         </body>
         </html>
     `);
+});
+
+// 🌟🌟 NEW: EDIT USER LOGIC 🌟🌟
+adminApp.post('/edit-user', async (req, res) => {
+    try {
+        const { groupName, oldToken, newToken, newTotalGB, newExpireDate } = req.body;
+        
+        // Check if new token already exists for another user
+        if (oldToken !== newToken) {
+            const existingToken = await User.findOne({ token: newToken });
+            if (existingToken) {
+                return res.status(400).send("Error: This Token already exists in the system.");
+            }
+        }
+
+        const user = await User.findOne({ token: oldToken });
+        
+        if (user) {
+            user.token = newToken.trim(); // remove accidental spaces
+            user.totalGB = Number(newTotalGB);
+            user.expireDate = newExpireDate;
+            await user.save();
+            
+            // Cache အဟောင်းကို ရှင်းထုတ်မည်
+            try { await redisClient.del(oldToken); } catch(e){}
+        }
+        res.redirect('/admin/group/' + encodeURIComponent(groupName));
+    } catch (error) {
+        res.status(500).send("Error updating user details");
+    }
 });
 
 // BATCH SYNC ALL NODES
@@ -525,7 +611,6 @@ adminApp.post('/update-group-master', async (req, res) => {
     }
 });
 
-// 🌟 ADD USER LOGIC (THE ULTIMATE ALPHANUMERIC 32-CHAR FIX)
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
@@ -542,18 +627,10 @@ adminApp.post('/add-user', async (req, res) => {
 
         if (masterResponse.data && masterResponse.data.keys) {
             
-            // 🌟🌟 ALPHANUMERIC GENERATOR: Exactly 32 characters, matching the working example! 🌟🌟
-            // Example of working token: e61cSmJe8w3vcNpyUn4EzEx6cMLAfddk
-            
-            // 1. Letters for the first character (to be safe with URL parsers)
             const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-            // 2. Full Alphanumeric set for the rest of the token
             const allChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
             
-            // Starts with a letter
             let token = letters.charAt(Math.floor(Math.random() * letters.length));
-            
-            // Add exactly 31 more random alphanumeric characters (Total = 32)
             for (let i = 0; i < 31; i++) {
                 token += allChars.charAt(Math.floor(Math.random() * allChars.length));
             }
@@ -625,7 +702,6 @@ adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
     }
 });
 
-// Root Sync New Server Webhook
 adminApp.post('/api/internal/sync-new-server', async (req, res) => {
     try {
         const apiKey = req.headers['x-api-key'];
