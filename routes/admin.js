@@ -1,14 +1,20 @@
+cat << 'EOF' > routes/admin.js
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
 const adminApp = express.Router();
 const Group = require('../models/Group');
 const User = require('../models/User');
+const Master = require('../models/Master'); // 🌟 Master DB အသစ်
 
+// ==========================================
+// 1. HOME DASHBOARD
+// ==========================================
 adminApp.get('/', async (req, res) => {
     const groups = await Group.find({});
-    let groupsHtml = '';
+    const masters = await Master.find({}); // 🌟 မှတ်ထားသော Master များကို ယူမည်
     
+    let groupsHtml = '';
     for (const g of groups) {
         const userCount = await User.countDocuments({ groupName: g.name });
         groupsHtml += `
@@ -16,11 +22,9 @@ adminApp.get('/', async (req, res) => {
             <div class="bg-gradient-to-r from-slate-800 to-slate-700 p-4 flex justify-between items-center">
                 <h3 class="text-lg font-bold text-white flex items-center">
                     <i class="fas fa-server text-indigo-400 mr-2"></i> ${g.name}
-                    <span class="ml-3 text-xs font-black bg-indigo-500 text-white px-2 py-1 rounded-md border border-indigo-400 shadow-sm">
-                        API - ${g.masterName || '1'}
-                    </span>
+                    <span class="ml-3 text-xs font-black bg-indigo-500 text-white px-2 py-1 rounded-md shadow-sm border border-indigo-400">${g.masterName || 'API-1'}</span>
                 </h3>
-                <form action="/admin/delete-group" method="POST" onsubmit="return confirm('⚠️ သတိပေးချက်: ဒီ Group ကို ဖျက်မှာ သေချာပြီလား?');" class="m-0">
+                <form action="/admin/delete-group" method="POST" onsubmit="return confirm('⚠️ Group ကို ဖျက်မှာ သေချာပြီလား?');" class="m-0">
                     <input type="hidden" name="groupName" value="${g.name}">
                     <button type="submit" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition" title="Delete Group"><i class="fas fa-trash-alt"></i></button>
                 </form>
@@ -47,40 +51,68 @@ adminApp.get('/', async (req, res) => {
         </div>`;
     }
 
+    // Master API များအတွက် Dropdown နှင့် ဇယား ဖန်တီးခြင်း
+    let masterOptions = '<option value="" disabled selected>Select a saved Master API...</option>';
+    let mastersListHtml = '';
+    masters.forEach((m, i) => {
+        masterOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`;
+        mastersListHtml += `
+            <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-2">
+                <div><span class="font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded text-xs mr-2">${m.name}</span> <span class="text-sm font-semibold text-slate-600">${m.ip}</span></div>
+                <form action="/admin/delete-master" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာလား?');" class="m-0">
+                    <input type="hidden" name="id" value="${m._id}">
+                    <button type="submit" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg"><i class="fas fa-trash"></i></button>
+                </form>
+            </div>
+        `;
+    });
+
     res.send(`
         <!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
         <body class="bg-slate-50 font-sans pb-10">
             <nav class="bg-gradient-to-r from-indigo-800 to-indigo-600 text-white shadow-lg p-5 mb-8">
-                <div class="max-w-7xl mx-auto font-black text-2xl tracking-tight"><i class="fas fa-shield-alt mr-2 text-indigo-300"></i> PROXY <span class="text-indigo-200 font-light">ADMIN</span></div>
+                <div class="max-w-7xl mx-auto flex items-center justify-between">
+                    <div class="font-black text-2xl tracking-tight"><i class="fas fa-shield-alt mr-2 text-indigo-300"></i> PROXY <span class="text-indigo-200 font-light">ADMIN</span></div>
+                </div>
             </nav>
             <div class="max-w-7xl mx-auto px-4">
+                
+                <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-8 flex flex-col md:flex-row gap-6">
+                    <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
+                        <label class="block text-lg font-black text-slate-800 mb-4"><i class="fas fa-key text-yellow-500 mr-2"></i> Save New Master API</label>
+                        <form action="/admin/add-master" method="POST" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <input type="text" name="name" placeholder="Name (e.g., API-1)" required class="border-2 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800">
+                            <input type="text" name="ip" placeholder="URL (http://ip:8888)" required class="border-2 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800">
+                            <input type="password" name="apiKey" placeholder="API Key" required class="border-2 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800">
+                            <button type="submit" class="md:col-span-3 bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-black transition text-sm"><i class="fas fa-save mr-2"></i> Save Master API</button>
+                        </form>
+                    </div>
+                    <div class="flex-1 pl-0 md:pl-2">
+                        <label class="block text-sm font-black text-slate-500 mb-3 uppercase tracking-wider">Saved APIs</label>
+                        <div class="max-h-32 overflow-y-auto pr-2">${mastersListHtml || '<p class="text-sm text-slate-400">No Master APIs saved yet.</p>'}</div>
+                    </div>
+                </div>
+
                 <div class="bg-white p-6 md:p-8 rounded-3xl shadow-lg border border-slate-100 mb-10">
-                    <label class="block text-lg font-black text-slate-800 mb-4 flex items-center"><i class="fas fa-network-wired text-indigo-500 mr-2"></i> Connect Master & Create Group</label>
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 pb-6 border-b border-slate-100">
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase text-indigo-600">API No.</label>
-                            <input type="text" id="apiMasterName" placeholder="e.g. 1" value="1" class="w-full border-2 border-indigo-200 bg-indigo-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-black text-indigo-800">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">Master URL / IP</label>
-                            <input type="text" id="apiMasterIp" placeholder="http://168.144.33.53:8888" class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-slate-800">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">Master API Key</label>
-                            <input type="password" id="apiMasterKey" placeholder="Your API Key" class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-slate-800">
+                    <label class="block text-lg font-black text-slate-800 mb-4"><i class="fas fa-network-wired text-indigo-500 mr-2"></i> Create Group</label>
+                    <div class="flex flex-col md:flex-row gap-4 mb-6 pb-6 border-b border-slate-100">
+                        <div class="flex-1">
+                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">Select Master API</label>
+                            <select id="savedMasterSelector" class="w-full border-2 border-indigo-200 bg-indigo-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-indigo-800">${masterOptions}</select>
                         </div>
                         <div class="flex items-end">
-                            <button type="button" onclick="fetchMasterGroups(this)" class="w-full bg-indigo-600 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-indigo-700 transition"><i class="fas fa-sync-alt mr-2"></i> Fetch Groups</button>
+                            <button type="button" onclick="fetchGroupsFromSaved()" id="fetchBtn" class="w-full md:w-auto bg-indigo-600 text-white px-8 py-3.5 rounded-xl font-bold hover:bg-indigo-700 transition"><i class="fas fa-sync-alt mr-2"></i> Fetch Groups</button>
                         </div>
                     </div>
+
                     <form action="/admin/create-group" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <input type="hidden" name="masterIp" id="formMasterIp">
                         <input type="hidden" name="masterApiKey" id="formMasterApiKey">
                         <input type="hidden" name="masterName" id="formMasterName">
                         
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">1. Select Master Group</label>
-                            <select name="masterGroupId" id="masterGroupSelect" required class="w-full border-2 border-slate-200 bg-slate-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-semibold text-slate-700"><option value="" disabled selected>Please fetch groups first...</option></select>
+                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">1. Select Group</label>
+                            <select name="masterGroupId" id="masterGroupSelect" required class="w-full border-2 border-slate-200 bg-slate-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-semibold text-slate-700"><option value="" disabled selected>Fetch groups first...</option></select>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">2. Local Name</label>
@@ -90,42 +122,58 @@ adminApp.get('/', async (req, res) => {
                             <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">3. Custom DNS</label>
                             <input type="text" name="nsRecord" placeholder="e.g. ns1.yourdomain.com" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-indigo-700">
                         </div>
-                        <div class="flex items-end"><button type="submit" class="w-full bg-slate-800 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-black transition"><i class="fas fa-plus-circle mr-2"></i> Create</button></div>
+                        <div class="flex items-end"><button type="submit" class="w-full bg-slate-800 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-black transition"><i class="fas fa-plus mr-2"></i> Create</button></div>
                     </form>
                 </div>
+                
                 <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">${groupsHtml || '<p class="col-span-full text-center py-10 text-slate-500">No groups found.</p>'}</div>
             </div>
+
             <script>
-                async function fetchMasterGroups(btn) {
-                    const ip = document.getElementById('apiMasterIp').value; 
-                    const key = document.getElementById('apiMasterKey').value;
-                    const apiNo = document.getElementById('apiMasterName').value || '1';
+                async function fetchGroupsFromSaved() {
+                    const selector = document.getElementById('savedMasterSelector').value;
+                    const btn = document.getElementById('fetchBtn');
+                    if(!selector) return alert("Please select a Master API from the list first!");
                     
-                    if(!ip || !key) return alert("Please enter Master URL and API Key!");
+                    const [ip, key, name] = selector.split('|');
                     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Fetching...';
+                    
                     try {
                         const res = await fetch('/admin/api/fetch-master-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ masterIp: ip, masterApiKey: key }) });
                         const data = await res.json();
+                        
                         if(data.success) {
                             let options = '<option value="" disabled selected>Select from Master...</option>';
                             data.groups.forEach(g => { options += \`<option value="\${g.id}">\${g.name} (\${g.serverCount} Nodes)</option>\`; });
+                            
                             document.getElementById('masterGroupSelect').innerHTML = options; 
                             document.getElementById('masterGroupSelect').classList.remove('bg-slate-50');
                             
-                            // 🌟 Hidden Data များကို Form ထဲသို့ ထည့်ပေးခြင်း
                             document.getElementById('formMasterIp').value = ip; 
                             document.getElementById('formMasterApiKey').value = key;
-                            document.getElementById('formMasterName').value = apiNo;
+                            document.getElementById('formMasterName').value = name;
 
-                            btn.innerHTML = '<i class="fas fa-check mr-2"></i> Connected!'; 
-                            btn.classList.replace('bg-indigo-600', 'bg-green-500'); 
+                            btn.innerHTML = '<i class="fas fa-check mr-2"></i> Connected!'; btn.classList.replace('bg-indigo-600', 'bg-green-500'); 
                             setTimeout(() => { btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; btn.classList.replace('bg-green-500', 'bg-indigo-600'); }, 2000);
-                        } else { alert("Failed: " + data.error); btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; }
+                        } else { alert("Connection Failed: " + data.error); btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; }
                     } catch(e) { alert("Network Error!"); btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; }
                 }
             </script>
         </body></html>
     `);
+});
+
+// Save & Delete Master APIs
+adminApp.post('/add-master', async (req, res) => {
+    try {
+        let { name, ip, apiKey } = req.body;
+        ip = ip.replace(/\/$/, "");
+        await Master.create({ name, ip, apiKey });
+        res.redirect('/admin');
+    } catch (e) { res.status(500).send("Error saving Master. Name might be duplicate."); }
+});
+adminApp.post('/delete-master', async (req, res) => {
+    await Master.findByIdAndDelete(req.body.id); res.redirect('/admin');
 });
 
 adminApp.post('/api/fetch-master-groups', async (req, res) => {
@@ -162,10 +210,14 @@ adminApp.post('/delete-group', async (req, res) => {
     } catch (error) { res.status(500).send("Error deleting group"); }
 });
 
+// ==========================================
+// 2. INSIDE GROUP VIEW (RE-LINK MASTER FEATURE)
+// ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
     const groupInfo = await Group.findOne({ name: groupName });
     const users = await User.find({ groupName: groupName });
+    const masters = await Master.find({}); // Get saved masters for re-linking
     
     const domainName = (groupInfo && groupInfo.nsRecord) ? groupInfo.nsRecord : (process.env.VPS_IP || req.hostname);
     const panelHost = process.env.VPS_IP || req.hostname;
@@ -198,20 +250,44 @@ adminApp.get('/group/:name', async (req, res) => {
         </tr>`;
     });
 
+    // 🌟 Re-Link Master Dropdown 🌟
+    let relinkOptions = '<option value="" disabled selected>Select Master API to Re-link...</option>';
+    masters.forEach(m => { relinkOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`; });
+
     res.send(`
         <!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
         <body class="bg-slate-50 font-sans pb-10">
-            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8"><div class="max-w-7xl mx-auto flex items-center"><a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl"><i class="fas fa-arrow-left"></i></a><span class="font-black text-xl">${groupName}</span><span class="ml-3 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-100">DNS: ${domainName}</span></div></nav>
-            <div class="max-w-7xl mx-auto px-4">
-                <div class="bg-white rounded-2xl shadow-sm border p-6 mb-8">
-                    <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <input type="hidden" name="groupName" value="${groupName}">
-                        <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold">
-                        <input type="number" name="totalGB" placeholder="Data Limit (GB)" required class="border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold">
-                        <input type="date" name="expireDate" required class="border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-slate-600">
-                        <button type="submit" class="bg-indigo-600 text-white rounded-xl py-3 font-bold hover:bg-indigo-700 transition">Generate Key</button>
-                    </form>
+            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-6">
+                <div class="max-w-7xl mx-auto flex items-center justify-between">
+                    <div class="flex items-center"><a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl"><i class="fas fa-arrow-left"></i></a><span class="font-black text-xl">${groupName}</span><span class="ml-3 text-xs font-bold text-white bg-indigo-500 px-2 py-1 rounded shadow-sm">${groupInfo.masterName || 'API'}</span></div>
+                    <div class="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200"><i class="fas fa-link text-indigo-400 mr-1"></i> ${groupInfo.masterIp || 'Not Linked'}</div>
                 </div>
+            </nav>
+            <div class="max-w-7xl mx-auto px-4">
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border p-6">
+                        <label class="block text-sm font-black text-slate-800 mb-4"><i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key</label>
+                        <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <input type="hidden" name="groupName" value="${groupName}">
+                            <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
+                            <input type="number" name="totalGB" placeholder="Data (GB)" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
+                            <input type="date" name="expireDate" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-600">
+                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">Create</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-yellow-50 rounded-2xl shadow-sm border border-yellow-200 p-6">
+                        <label class="block text-sm font-black text-yellow-800 mb-2"><i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection</label>
+                        <p class="text-xs text-yellow-700 mb-3">If this group loses connection to its Master, re-link it here.</p>
+                        <form action="/admin/update-group-master" method="POST" class="flex flex-col gap-2">
+                            <input type="hidden" name="groupName" value="${groupName}">
+                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">${relinkOptions}</select>
+                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">Re-Link Master</button>
+                        </form>
+                    </div>
+                </div>
+
                 <div class="bg-white rounded-2xl shadow-sm border overflow-hidden"><table class="w-full text-left"><thead><tr class="bg-slate-100 text-xs uppercase text-slate-500"><th class="p-4">No</th><th class="p-4">User</th><th class="p-4">Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Actions</th></tr></thead><tbody>${usersHtml}</tbody></table></div>
             </div>
             <script>
@@ -223,6 +299,18 @@ adminApp.get('/group/:name', async (req, res) => {
             </script>
         </body></html>
     `);
+});
+
+// 🌟 Re-Link API
+adminApp.post('/update-group-master', async (req, res) => {
+    try {
+        const { groupName, masterData } = req.body;
+        if(masterData) {
+            const [ip, apiKey, name] = masterData.split('|');
+            await Group.updateOne({ name: groupName }, { masterIp: ip, masterApiKey: apiKey, masterName: name });
+        }
+        res.redirect('/admin/group/' + encodeURIComponent(groupName));
+    } catch (e) { res.status(500).send("Error updating connection"); }
 });
 
 adminApp.post('/add-user', async (req, res) => {
@@ -249,7 +337,7 @@ adminApp.post('/delete-user', async (req, res) => {
         const token = req.body.token;
         const groupInfo = await Group.findOne({ name: req.body.groupName });
         if (groupInfo) {
-            try { await axios.post(groupInfo.masterIp + '/api/user-action', { token: token, action: "delete" }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e) { console.log("Master Panel Delete Failed"); }
+            try { await axios.post(groupInfo.masterIp + '/api/user-action', { token: token, action: "delete" }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e) {}
         }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
@@ -273,3 +361,4 @@ adminApp.post('/api/receive-gb', async (req, res) => {
 });
 
 module.exports = adminApp;
+EOF
