@@ -525,7 +525,7 @@ adminApp.post('/update-group-master', async (req, res) => {
     }
 });
 
-// 🌟 ADD USER LOGIC (SHORTER TOKEN + CAPITAL LETTER FIX)
+// 🌟 ADD USER LOGIC (FIXED TOKEN LENGTH FOR HIDDIFY)
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
@@ -542,12 +542,11 @@ adminApp.post('/add-user', async (req, res) => {
 
         if (masterResponse.data && masterResponse.data.keys) {
             
-            // 🌟🌟 FIX: Token must ALWAYS start with a random UPPERCASE letter (A-Z) 
-            // 65 is 'A' in ASCII. 65 + random(0-25) gives A to Z
+            // 🌟🌟 FIX: Token starts with random UPPERCASE letter + 24 random hex characters 🌟🌟
             const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26)); 
             
-            // 🌟🌟 FIX: Reduced length of the token (10 bytes = 20 hex characters) + 1 letter = 21 characters total
-            const token = randomLetter + crypto.randomBytes(10).toString('hex'); 
+            // crypto.randomBytes(12) gives 24 hex characters. Total length = 25 characters
+            const token = randomLetter + crypto.randomBytes(12).toString('hex'); 
             
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
             await User.create({ 
