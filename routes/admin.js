@@ -429,19 +429,38 @@ adminApp.get('/group/:name', async (req, res) => {
                     <table class="w-full text-left">
                         <thead>
                             <tr class="bg-slate-100 text-xs uppercase text-slate-500">
-                                <th class="p-4">ID</th><th class="p-4">User</th><th class="p-4">Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Actions</th>
+                                <th class="p-4">ID</th>
+                                <th class="p-4">User</th>
+                                <th class="p-4">Node</th>
+                                <th class="p-4">Expire</th>
+                                <th class="p-4">Usage</th>
+                                <th class="p-4 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody>${usersHtml}</tbody>
+                        <tbody>
+                            ${usersHtml}
+                        </tbody>
                     </table>
                 </div>
             </div>
 
             <script>
                 function copyLink(link, btnId, origHtml) {
-                    var tempInput = document.createElement("input"); tempInput.value = link; document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
-                    var btn = document.getElementById(btnId); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.classList.add('bg-green-500', 'text-white');
-                    setTimeout(() => { btn.innerHTML = origHtml; btn.classList.remove('bg-green-500', 'text-white'); }, 2000);
+                    var tempInput = document.createElement("input"); 
+                    tempInput.value = link; 
+                    document.body.appendChild(tempInput); 
+                    tempInput.select(); 
+                    document.execCommand("copy"); 
+                    document.body.removeChild(tempInput);
+                    
+                    var btn = document.getElementById(btnId); 
+                    btn.innerHTML = '<i class="fas fa-check"></i>'; 
+                    btn.classList.add('bg-green-500', 'text-white');
+                    
+                    setTimeout(() => { 
+                        btn.innerHTML = origHtml; 
+                        btn.classList.remove('bg-green-500', 'text-white'); 
+                    }, 2000);
                 }
             </script>
         </body>
@@ -506,7 +525,7 @@ adminApp.post('/update-group-master', async (req, res) => {
     }
 });
 
-// 🌟 ADD USER LOGIC (CAPITAL LETTER TOKEN FIX INCLUDED)
+// 🌟 ADD USER LOGIC (SHORTER TOKEN + CAPITAL LETTER FIX)
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
@@ -523,10 +542,12 @@ adminApp.post('/add-user', async (req, res) => {
 
         if (masterResponse.data && masterResponse.data.keys) {
             
-            // 🌟🌟 HIDDIFY FIX: Token must ALWAYS start with a random UPPERCASE letter (A-Z) 🌟🌟
+            // 🌟🌟 FIX: Token must ALWAYS start with a random UPPERCASE letter (A-Z) 
             // 65 is 'A' in ASCII. 65 + random(0-25) gives A to Z
             const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26)); 
-            const token = randomLetter + crypto.randomBytes(15).toString('hex'); 
+            
+            // 🌟🌟 FIX: Reduced length of the token (10 bytes = 20 hex characters) + 1 letter = 21 characters total
+            const token = randomLetter + crypto.randomBytes(10).toString('hex'); 
             
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
             await User.create({ 
