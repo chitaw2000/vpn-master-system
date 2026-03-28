@@ -238,7 +238,7 @@ adminApp.post('/add-master', async (req, res) => {
         await Master.create({ name, ip, apiKey }); 
         res.redirect('/admin'); 
     } catch (e) { 
-        res.status(500).send("Error saving Master. Name might be duplicate."); 
+        res.status(500).send("Error saving Master."); 
     }
 });
 
@@ -273,12 +273,7 @@ adminApp.post('/create-group', async (req, res) => {
         if (groupName && masterGroupId && nsRecord && masterIp && masterApiKey) { 
             let cleanIp = masterIp.replace(/\/$/, ""); 
             await Group.create({ 
-                name: groupName, 
-                masterGroupId, 
-                nsRecord, 
-                masterIp: cleanIp, 
-                masterApiKey, 
-                masterName: masterName || "1" 
+                name: groupName, masterGroupId, nsRecord, masterIp: cleanIp, masterApiKey, masterName: masterName || "1" 
             }); 
         }
         res.redirect('/admin');
@@ -410,32 +405,22 @@ adminApp.get('/group/:name', async (req, res) => {
             <div class="max-w-7xl mx-auto px-4">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border p-6">
-                        <label class="block text-sm font-black text-slate-800 mb-4">
-                            <i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key
-                        </label>
+                        <label class="block text-sm font-black text-slate-800 mb-4"><i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key</label>
                         <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-3">
                             <input type="hidden" name="groupName" value="${groupName}">
                             <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
                             <input type="number" name="totalGB" placeholder="Data (GB)" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
                             <input type="date" name="expireDate" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-600">
-                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">
-                                Create
-                            </button>
+                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">Create</button>
                         </form>
                     </div>
 
                     <div class="bg-yellow-50 rounded-2xl shadow-sm border border-yellow-200 p-6">
-                        <label class="block text-sm font-black text-yellow-800 mb-2">
-                            <i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection
-                        </label>
+                        <label class="block text-sm font-black text-yellow-800 mb-2"><i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection</label>
                         <form action="/admin/update-group-master" method="POST" class="flex flex-col gap-2">
                             <input type="hidden" name="groupName" value="${groupName}">
-                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">
-                                ${relinkOptions}
-                            </select>
-                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">
-                                Re-Link Master
-                            </button>
+                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">${relinkOptions}</select>
+                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">Re-Link Master</button>
                         </form>
                     </div>
                 </div>
@@ -444,38 +429,19 @@ adminApp.get('/group/:name', async (req, res) => {
                     <table class="w-full text-left">
                         <thead>
                             <tr class="bg-slate-100 text-xs uppercase text-slate-500">
-                                <th class="p-4">ID</th>
-                                <th class="p-4">User</th>
-                                <th class="p-4">Node</th>
-                                <th class="p-4">Expire</th>
-                                <th class="p-4">Usage</th>
-                                <th class="p-4 text-right">Actions</th>
+                                <th class="p-4">ID</th><th class="p-4">User</th><th class="p-4">Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            ${usersHtml}
-                        </tbody>
+                        <tbody>${usersHtml}</tbody>
                     </table>
                 </div>
             </div>
 
             <script>
                 function copyLink(link, btnId, origHtml) {
-                    var tempInput = document.createElement("input"); 
-                    tempInput.value = link; 
-                    document.body.appendChild(tempInput); 
-                    tempInput.select(); 
-                    document.execCommand("copy"); 
-                    document.body.removeChild(tempInput);
-                    
-                    var btn = document.getElementById(btnId); 
-                    btn.innerHTML = '<i class="fas fa-check"></i>'; 
-                    btn.classList.add('bg-green-500', 'text-white');
-                    
-                    setTimeout(() => { 
-                        btn.innerHTML = origHtml; 
-                        btn.classList.remove('bg-green-500', 'text-white'); 
-                    }, 2000);
+                    var tempInput = document.createElement("input"); tempInput.value = link; document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
+                    var btn = document.getElementById(btnId); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.classList.add('bg-green-500', 'text-white');
+                    setTimeout(() => { btn.innerHTML = origHtml; btn.classList.remove('bg-green-500', 'text-white'); }, 2000);
                 }
             </script>
         </body>
@@ -483,7 +449,7 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟🌟 NEW & IMPROVED: FAST CONCURRENT SYNC ALL NODES API 🌟🌟
+// 🌟🌟 NEW: BATCH SYNC ALL NODES API 🌟🌟
 adminApp.post('/sync-group-nodes', async (req, res) => {
     try {
         const groupName = req.body.groupName;
@@ -492,30 +458,33 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
 
         const users = await User.find({ groupName: groupName });
         
-        // 🌟 Promise.all ကို သုံးပြီး User အားလုံးကို တစ်ပြိုင်နက်တည်း (Fast) ဆွဲယူမည် 🌟
-        await Promise.all(users.map(async (user) => {
-            try {
-                // Master Developer ပေးထားသော "GET /conf/{token}.json" လမ်းကြောင်းအမှန်ကို အသုံးပြုထားပါသည်
-                const url = `${groupInfo.masterIp}/conf/${user.token}.json`;
-                // ၃ စက္ကန့်အတွင်း မရလျှင် ချက်ချင်း ဖြတ်ချမည့် (Strict Timeout) စနစ်
-                const response = await axios.get(url, { timeout: 3000 });
+        // 🌟 ၅ ယောက်တစ်သုတ် (Batch Processing) ဖြင့် ဆွဲယူမည် (Master ဆာဗာ Down မသွားအောင်)
+        const batchSize = 5;
+        for (let i = 0; i < users.length; i += batchSize) {
+            const batch = users.slice(i, i + batchSize);
+            await Promise.all(batch.map(async (user) => {
+                try {
+                    // Node အားလုံးအပြည့်အစုံရမည့် လမ်းကြောင်းကို ပြန်လည်အသုံးပြုထားပါသည်
+                    const masterResponse = await fetchWithRetry(groupInfo.masterIp + '/api/generate-keys', {
+                        masterGroupId: groupInfo.masterGroupId, 
+                        userName: user.name, 
+                        totalGB: user.totalGB, 
+                        expireDate: user.expireDate
+                    }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 6000 }); // 6s timeout
 
-                if (response.data && response.data.server) {
-                    if (!user.accessKeys) user.accessKeys = {};
-                    
-                    const nodeName = (user.currentServer && user.currentServer !== "None") ? user.currentServer : "Auto-Synced-Node";
-                    user.accessKeys[nodeName] = response.data;
-                    user.currentServer = nodeName;
-                    
-                    user.markModified('accessKeys');
-                    await user.save();
+                    if (masterResponse.data && masterResponse.data.keys) {
+                        user.accessKeys = masterResponse.data.keys;
+                        if (!user.accessKeys[user.currentServer]) {
+                            user.currentServer = Object.keys(user.accessKeys)[0] || "None";
+                        }
+                        user.markModified('accessKeys');
+                        await user.save();
+                    }
+                } catch (err) {
+                    console.log(`❌ Failed to sync nodes for user: ${user.name}`);
                 }
-            } catch (err) {
-                // တစ်ယောက်ယောက် fail သွားရင်တောင် ကျန်တဲ့သူတွေ ဆက်အလုပ်လုပ်အောင် Silent ထားပါမည်
-                console.log(`❌ Failed to manual sync node for user: ${user.name}`);
-            }
-        }));
-
+            }));
+        }
         res.redirect('/admin/group/' + encodeURIComponent(groupName));
     } catch (error) {
         res.status(500).send("Error syncing nodes");
@@ -577,9 +546,7 @@ adminApp.post('/delete-user', async (req, res) => {
                     { username: user.name, token: token },
                     { headers: { 'x-api-key': groupInfo.masterApiKey } }
                 ); 
-            } catch(e) { 
-                console.error(`❌ Master Delete Failed for ${user.name}`); 
-            }
+            } catch(e) {}
         }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
