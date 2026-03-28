@@ -6,14 +6,14 @@ const Group = require('../models/Group');
 const User = require('../models/User');
 const Master = require('../models/Master');
 
-// 🌟 Exponential Backoff Retry Function (ဟိုဘက်ဆာဗာ မမိရင် ၃ ကြိမ် ပြန်ခေါ်ပေးမည့်စနစ်)
+// 🌟 Exponential Backoff Retry Function
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
     for (let i = 0; i < retries; i++) {
         try {
             return await axios.post(url, data, config);
         } catch (err) {
             if (i === retries - 1) throw err;
-            await new Promise(res => setTimeout(res, delay * Math.pow(2, i))); // 1s, 2s, 4s waiting
+            await new Promise(res => setTimeout(res, delay * Math.pow(2, i))); 
         }
     }
 }
@@ -238,7 +238,7 @@ adminApp.post('/add-master', async (req, res) => {
         await Master.create({ name, ip, apiKey }); 
         res.redirect('/admin'); 
     } catch (e) { 
-        res.status(500).send("Error saving Master. Name might be duplicate."); 
+        res.status(500).send("Error saving Master."); 
     }
 });
 
@@ -273,18 +273,11 @@ adminApp.post('/create-group', async (req, res) => {
         if (groupName && masterGroupId && nsRecord && masterIp && masterApiKey) { 
             let cleanIp = masterIp.replace(/\/$/, ""); 
             await Group.create({ 
-                name: groupName, 
-                masterGroupId, 
-                nsRecord, 
-                masterIp: cleanIp, 
-                masterApiKey, 
-                masterName: masterName || "1" 
+                name: groupName, masterGroupId, nsRecord, masterIp: cleanIp, masterApiKey, masterName: masterName || "1" 
             }); 
         }
         res.redirect('/admin');
-    } catch (error) { 
-        res.status(500).send("Error creating group"); 
-    }
+    } catch (error) { res.status(500).send("Error creating group"); }
 });
 
 adminApp.post('/delete-group', async (req, res) => {
@@ -300,17 +293,13 @@ adminApp.post('/delete-group', async (req, res) => {
                         { username: u.name, token: u.token }, 
                         { headers: { 'x-api-key': groupInfo.masterApiKey } }
                     ); 
-                } catch(e) {
-                    console.log("Failed to delete user on master:", u.name);
-                } 
+                } catch(e) {} 
             } 
         }
         await Group.deleteOne({ name: req.body.groupName }); 
         await User.deleteMany({ groupName: req.body.groupName }); 
         res.redirect('/admin');
-    } catch (error) { 
-        res.status(500).send("Error deleting group"); 
-    }
+    } catch (error) { res.status(500).send("Error deleting group"); }
 });
 
 // ==========================================
@@ -354,27 +343,19 @@ adminApp.get('/group/:name', async (req, res) => {
                 </div>
             </td>
             <td class="p-4 text-right flex justify-end gap-2">
-                <button id="panelBtn-${u.token}" onclick="copyLink('${webPanelLink}', 'panelBtn-${u.token}', '<i class=\\'fas fa-globe\\'></i>')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy Web Panel Link">
-                    <i class="fas fa-globe"></i>
-                </button>
-                <button id="btn-${u.token}" onclick="copyLink('${ssconfLink}', 'btn-${u.token}', '<i class=\\'fas fa-link\\'></i>')" class="bg-slate-100 text-slate-600 hover:bg-green-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy SSCONF Link">
-                    <i class="fas fa-link"></i>
-                </button>
+                <button id="panelBtn-${u.token}" onclick="copyLink('${webPanelLink}', 'panelBtn-${u.token}', '<i class=\\'fas fa-globe\\'></i>')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy Web Panel Link"><i class="fas fa-globe"></i></button>
+                <button id="btn-${u.token}" onclick="copyLink('${ssconfLink}', 'btn-${u.token}', '<i class=\\'fas fa-link\\'></i>')" class="bg-slate-100 text-slate-600 hover:bg-green-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy SSCONF Link"><i class="fas fa-link"></i></button>
                 <form action="/admin/delete-user" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာပြီလား?');" class="m-0">
                     <input type="hidden" name="token" value="${u.token}">
                     <input type="hidden" name="groupName" value="${u.groupName}">
-                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition"><i class="fas fa-trash"></i></button>
                 </form>
             </td>
         </tr>`;
     });
 
     let relinkOptions = '<option value="" disabled selected>Select Master API to Re-link...</option>';
-    masters.forEach(m => { 
-        relinkOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`; 
-    });
+    masters.forEach(m => { relinkOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`; });
 
     res.send(`
         <!DOCTYPE html>
@@ -390,13 +371,9 @@ adminApp.get('/group/:name', async (req, res) => {
             <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-6">
                 <div class="max-w-7xl mx-auto flex items-center justify-between">
                     <div class="flex items-center">
-                        <a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl">
-                            <i class="fas fa-arrow-left"></i>
-                        </a>
+                        <a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl"><i class="fas fa-arrow-left"></i></a>
                         <span class="font-black text-xl">${groupName}</span>
-                        <span class="ml-3 text-xs font-bold text-white bg-indigo-500 px-2 py-1 rounded shadow-sm">
-                            ${groupInfo.masterName || 'API'}
-                        </span>
+                        <span class="ml-3 text-xs font-bold text-white bg-indigo-500 px-2 py-1 rounded shadow-sm">${groupInfo.masterName || 'API'}</span>
                     </div>
                     <div class="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
                         <i class="fas fa-link text-indigo-400 mr-1"></i> ${groupInfo.masterIp || 'Not Linked'}
@@ -407,32 +384,22 @@ adminApp.get('/group/:name', async (req, res) => {
             <div class="max-w-7xl mx-auto px-4">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border p-6">
-                        <label class="block text-sm font-black text-slate-800 mb-4">
-                            <i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key
-                        </label>
+                        <label class="block text-sm font-black text-slate-800 mb-4"><i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key</label>
                         <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-3">
                             <input type="hidden" name="groupName" value="${groupName}">
                             <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
                             <input type="number" name="totalGB" placeholder="Data (GB)" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
                             <input type="date" name="expireDate" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-600">
-                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">
-                                Create
-                            </button>
+                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">Create</button>
                         </form>
                     </div>
 
                     <div class="bg-yellow-50 rounded-2xl shadow-sm border border-yellow-200 p-6">
-                        <label class="block text-sm font-black text-yellow-800 mb-2">
-                            <i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection
-                        </label>
+                        <label class="block text-sm font-black text-yellow-800 mb-2"><i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection</label>
                         <form action="/admin/update-group-master" method="POST" class="flex flex-col gap-2">
                             <input type="hidden" name="groupName" value="${groupName}">
-                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">
-                                ${relinkOptions}
-                            </select>
-                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">
-                                Re-Link Master
-                            </button>
+                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">${relinkOptions}</select>
+                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">Re-Link Master</button>
                         </form>
                     </div>
                 </div>
@@ -441,38 +408,19 @@ adminApp.get('/group/:name', async (req, res) => {
                     <table class="w-full text-left">
                         <thead>
                             <tr class="bg-slate-100 text-xs uppercase text-slate-500">
-                                <th class="p-4">ID</th>
-                                <th class="p-4">User</th>
-                                <th class="p-4">Node</th>
-                                <th class="p-4">Expire</th>
-                                <th class="p-4">Usage</th>
-                                <th class="p-4 text-right">Actions</th>
+                                <th class="p-4">ID</th><th class="p-4">User</th><th class="p-4">Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            ${usersHtml}
-                        </tbody>
+                        <tbody>${usersHtml}</tbody>
                     </table>
                 </div>
             </div>
 
             <script>
                 function copyLink(link, btnId, origHtml) {
-                    var tempInput = document.createElement("input"); 
-                    tempInput.value = link; 
-                    document.body.appendChild(tempInput); 
-                    tempInput.select(); 
-                    document.execCommand("copy"); 
-                    document.body.removeChild(tempInput);
-                    
-                    var btn = document.getElementById(btnId); 
-                    btn.innerHTML = '<i class="fas fa-check"></i>'; 
-                    btn.classList.add('bg-green-500', 'text-white');
-                    
-                    setTimeout(() => { 
-                        btn.innerHTML = origHtml; 
-                        btn.classList.remove('bg-green-500', 'text-white'); 
-                    }, 2000);
+                    var tempInput = document.createElement("input"); tempInput.value = link; document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
+                    var btn = document.getElementById(btnId); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.classList.add('bg-green-500', 'text-white');
+                    setTimeout(() => { btn.innerHTML = origHtml; btn.classList.remove('bg-green-500', 'text-white'); }, 2000);
                 }
             </script>
         </body>
@@ -488,9 +436,7 @@ adminApp.post('/update-group-master', async (req, res) => {
             await Group.updateOne({ name: groupName }, { masterIp: ip, masterApiKey: apiKey, masterName: name }); 
         }
         res.redirect('/admin/group/' + encodeURIComponent(groupName));
-    } catch (e) { 
-        res.status(500).send("Error updating connection"); 
-    }
+    } catch (e) { res.status(500).send("Error updating connection"); }
 });
 
 adminApp.post('/add-user', async (req, res) => {
@@ -510,27 +456,12 @@ adminApp.post('/add-user', async (req, res) => {
         if (masterResponse.data && masterResponse.data.keys) {
             const token = crypto.randomBytes(16).toString('hex'); 
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
-            await User.create({ 
-                name, 
-                token, 
-                groupName, 
-                totalGB: Number(totalGB), 
-                usedGB: 0, 
-                currentServer: defaultServer, 
-                expireDate, 
-                accessKeys: masterResponse.data.keys, 
-                userNo: nextNo 
-            });
+            await User.create({ name, token, groupName, totalGB: Number(totalGB), usedGB: 0, currentServer: defaultServer, expireDate, accessKeys: masterResponse.data.keys, userNo: nextNo });
             res.redirect('/admin/group/' + encodeURIComponent(groupName));
-        } else { 
-            res.status(400).send("Master Panel API Error"); 
-        }
-    } catch (error) { 
-        res.status(500).send("Error connecting to Master"); 
-    }
+        } else { res.status(400).send("Master Panel API Error"); }
+    } catch (error) { res.status(500).send("Error connecting to Master"); }
 });
 
-// 🌟 Master Developer ရဲ့ သတ်မှတ်ချက်အတိုင်း Delete API အသစ်
 adminApp.post('/delete-user', async (req, res) => {
     try {
         const token = req.body.token;
@@ -544,29 +475,21 @@ adminApp.post('/delete-user', async (req, res) => {
                     { username: user.name, token: token },
                     { headers: { 'x-api-key': groupInfo.masterApiKey } }
                 ); 
-                console.log(`✅ Deleted user on Master: ${user.name}`);
-            } catch(e) { 
-                console.error(`❌ Master Delete Failed for ${user.name}`); 
-            }
+            } catch(e) {}
         }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
-    } catch (error) { 
-        res.status(500).send("Error deleting user"); 
-    }
+    } catch (error) { res.status(500).send("Error deleting user"); }
 });
 
-// 🌟 Master Developer ရဲ့ သတ်မှတ်ချက်အတိုင်း Webhook အသစ်
+// GB Sync Webhook
 adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
     try {
-        const { name, usedGB, totalGB, expireDate, isBlocked } = req.body;
-        
+        const { name, usedGB, totalGB, expireDate } = req.body;
         if (!name) return res.status(400).json({ error: "Missing username" });
 
         const user = await User.findOne({ name: name });
-        if (!user) {
-            return res.status(404).json({ error: "User not found locally" });
-        }
+        if (!user) return res.status(404).json({ error: "User not found locally" });
 
         if (usedGB !== undefined) user.usedGB = Number(usedGB);
         if (totalGB !== undefined) user.totalGB = Number(totalGB);
@@ -574,8 +497,38 @@ adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
         
         await user.save();
         return res.json({ success: true, message: "Usage synced successfully" });
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
+});
+
+// 🌟🌟 NEW: Server ပြောင်းသွားသည့်အချိန် Master က Auto Push လာမည့် Webhook (Admin Route)
+adminApp.post('/api/internal/sync-new-server', async (req, res) => {
+    try {
+        const apiKey = req.headers['x-api-key'];
+        const { masterGroupId, newServerName, userKeys } = req.body;
+
+        if (!masterGroupId || !newServerName || !userKeys) {
+            return res.status(400).json({ error: "Invalid payload data" });
+        }
+
+        const validGroup = await Group.findOne({ masterGroupId: masterGroupId, masterApiKey: apiKey });
+        if (!validGroup) {
+            return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
+        }
+
+        // Token တစ်ခုချင်းစီအတွက် Key အသစ်များကို Database ထဲသို့ ထည့်ပေးခြင်း
+        for (const [token, newConfig] of Object.entries(userKeys)) {
+            const user = await User.findOne({ token: token });
+            if (user) {
+                if (!user.accessKeys) user.accessKeys = {};
+                
+                user.accessKeys[newServerName] = newConfig;
+                user.markModified('accessKeys'); // Database ကို အသိပေးခြင်း
+                await user.save();
+            }
+        }
+        return res.json({ success: true, message: "Server synced successfully" });
     } catch (error) { 
-        console.error("Sync Webhook Error:", error.message);
+        console.error("Sync New Server Error:", error.message);
         res.status(500).json({ error: "Server Error" }); 
     }
 });
