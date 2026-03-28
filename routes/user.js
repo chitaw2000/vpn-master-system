@@ -205,4 +205,37 @@ userApp.get('/:token.json', async (req, res) => {
     }
 });
 
+// 🌟🌟 NEW: Server ပြောင်းသွားသည့်အချိန် Master က Auto Push လာမည့် Webhook (Root API Route)
+userApp.post('/api/internal/sync-new-server', async (req, res) => {
+    try {
+        const apiKey = req.headers['x-api-key'];
+        const { masterGroupId, newServerName, userKeys } = req.body;
+
+        if (!masterGroupId || !newServerName || !userKeys) {
+            return res.status(400).json({ error: "Invalid payload data" });
+        }
+
+        const validGroup = await Group.findOne({ masterGroupId: masterGroupId, masterApiKey: apiKey });
+        if (!validGroup) {
+            return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
+        }
+
+        // Token တစ်ခုချင်းစီအတွက် Key အသစ်များကို Database ထဲသို့ ထည့်ပေးခြင်း
+        for (const [token, newConfig] of Object.entries(userKeys)) {
+            const user = await User.findOne({ token: token });
+            if (user) {
+                if (!user.accessKeys) user.accessKeys = {};
+                
+                user.accessKeys[newServerName] = newConfig;
+                user.markModified('accessKeys'); // Database ကို အသိပေးခြင်း
+                await user.save();
+            }
+        }
+        return res.json({ success: true, message: "Server synced successfully" });
+    } catch (error) { 
+        console.error("Sync New Server Error:", error.message);
+        res.status(500).json({ error: "Server Error" }); 
+    }
+});
+
 module.exports = userApp;
