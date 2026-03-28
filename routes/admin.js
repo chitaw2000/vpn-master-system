@@ -1,24 +1,27 @@
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const adminApp = express.Router();
 const Group = require('../models/Group');
 const User = require('../models/User');
 const Master = require('../models/Master');
 const redisClient = require('../config/redis');
 
-// 🌟 Exponential Backoff Retry Function (FIXED: Supports both GET and POST)
+// 🌟 Backup Directory Setup 🌟
+const backupDir = path.join(process.cwd(), 'backups');
+if (!fs.existsSync(backupDir)) {
+    fs.mkdirSync(backupDir, { recursive: true });
+}
+
+// 🌟 Exponential Backoff Retry Function
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
     const method = (config && config.method) ? config.method.toLowerCase() : 'post';
-    
     for (let i = 0; i < retries; i++) {
         try {
-            if (method === 'get') {
-                return await axios.get(url, config);
-            } else {
-                // Send {} instead of null to prevent parser crashes on master
-                return await axios.post(url, data || {}, config); 
-            }
+            if (method === 'get') return await axios.get(url, config);
+            else return await axios.post(url, data || {}, config); 
         } catch (err) {
             if (i === retries - 1) throw err;
             await new Promise(res => setTimeout(res, delay * Math.pow(2, i))); 
@@ -27,47 +30,77 @@ async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
 }
 
 // ==========================================
-// 1. HOME DASHBOARD
+// 1. HOME DASHBOARD (WITH BACKUP & SEARCH & ANIMATIONS)
 // ==========================================
 adminApp.get('/', async (req, res) => {
     const groups = await Group.find({});
     const masters = await Master.find({}); 
     
+    // 🌟 Read Available Backups
+    let backups = [];
+    if (fs.existsSync(backupDir)) {
+        backups = fs.readdirSync(backupDir).filter(f => f.endsWith('.json')).sort().reverse();
+    }
+    
+    let backupHtml = '';
+    if (backups.length === 0) {
+        backupHtml = '<p class="text-xs text-slate-400">No backups available.</p>';
+    } else {
+        backups.forEach(b => {
+            const badgeColor = b.includes('Full') ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600';
+            const badgeText = b.includes('Full') ? 'FULL' : 'GROUP';
+            backupHtml += `
+            <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl mb-2 border border-slate-100 hover:shadow-md hover:border-indigo-200 transition-all duration-300">
+                <div class="flex items-center gap-2 overflow-hidden">
+                    <span class="${badgeColor} px-2 py-0.5 rounded text-[10px] font-black tracking-wider">${badgeText}</span>
+                    <span class="font-mono text-[11px] text-slate-600 truncate">${b}</span>
+                </div>
+                <div class="flex gap-2 ml-2">
+                    <form action="/admin/restore-backup" method="POST" onsubmit="return confirm('ဒီ Backup ကို တကယ် ပြန်ထည့်မှာ သေချာလား? ယာယီ Data များ အစားထိုးသွားပါမည်!');" class="m-0">
+                        <input type="hidden" name="filename" value="${b}">
+                        <button type="submit" class="bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-sm" title="Restore"><i class="fas fa-undo"></i></button>
+                    </form>
+                    <form action="/admin/delete-backup" method="POST" onsubmit="return confirm('Backup ဖိုင်အား ဖျက်မှာ သေချာလား?');" class="m-0">
+                        <input type="hidden" name="filename" value="${b}">
+                        <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-sm" title="Delete"><i class="fas fa-trash"></i></button>
+                    </form>
+                </div>
+            </div>`;
+        });
+    }
+
     let groupsHtml = '';
     for (const g of groups) {
         const userCount = await User.countDocuments({ groupName: g.name });
         groupsHtml += `
-        <div class="bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 border border-slate-100 overflow-hidden flex flex-col">
-            <div class="bg-gradient-to-r from-slate-800 to-slate-700 p-4 flex justify-between items-center">
-                <h3 class="text-lg font-bold text-white flex items-center">
-                    <i class="fas fa-server text-indigo-400 mr-2"></i> ${g.name} 
-                    <span class="ml-3 text-xs font-black bg-indigo-500 text-white px-2 py-1 rounded-md shadow-sm border border-indigo-400">
+        <div class="bg-white rounded-3xl shadow-sm hover:shadow-xl transition-all duration-300 border border-slate-100 overflow-hidden flex flex-col hover:-translate-y-1">
+            <div class="bg-gradient-to-r from-slate-800 to-slate-700 p-5 flex justify-between items-center">
+                <h3 class="text-lg font-black text-white flex items-center">
+                    <i class="fas fa-server text-indigo-400 mr-2 drop-shadow-md"></i> ${g.name} 
+                    <span class="ml-3 text-[10px] font-black bg-indigo-500 text-white px-2 py-1 rounded-md shadow-sm border border-indigo-400 uppercase tracking-widest">
                         ${g.masterName || 'API-1'}
                     </span>
                 </h3>
-                <form action="/admin/delete-group" method="POST" onsubmit="return confirm('Group ကို ဖျက်မှာ သေချာပြီလား?');" class="m-0">
-                    <input type="hidden" name="groupName" value="${g.name}">
-                    <button type="submit" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition" title="Delete Group">
-                        <i class="fas fa-trash-alt"></i>
-                    </button>
-                </form>
+                <button onclick="openDoubleConfirmModal('${g.name}')" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2.5 rounded-xl transition" title="Delete Group">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
             </div>
-            <div class="p-5 flex-1">
-                <div class="flex items-center justify-between mb-3 border-b border-slate-50 pb-3">
-                    <span class="text-xs text-slate-400 font-semibold uppercase">Master IP</span>
-                    <span class="text-xs font-bold text-slate-600 truncate w-32 text-right">${g.masterIp || 'N/A'}</span>
+            <div class="p-6 flex-1">
+                <div class="flex items-center justify-between mb-4 border-b border-slate-50 pb-4">
+                    <span class="text-xs text-slate-400 font-bold uppercase tracking-wider">Master IP</span>
+                    <span class="text-sm font-bold text-slate-700 truncate w-32 text-right">${g.masterIp || 'N/A'}</span>
                 </div>
-                <div class="flex items-center justify-between mb-4">
-                    <span class="text-xs text-slate-400 font-semibold uppercase">Custom DNS</span>
+                <div class="flex items-center justify-between mb-5">
+                    <span class="text-xs text-slate-400 font-bold uppercase tracking-wider">Custom DNS</span>
                     <span class="text-sm font-bold text-indigo-600 truncate max-w-[150px]">${g.nsRecord || 'N/A'}</span>
                 </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-400 font-semibold uppercase">Active Users</span>
-                    <span class="text-xl font-black text-slate-800">${userCount}</span>
+                <div class="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span class="text-xs text-slate-500 font-bold uppercase tracking-wider">Active Users</span>
+                    <span class="text-2xl font-black text-slate-800">${userCount}</span>
                 </div>
             </div>
             <div class="p-4 bg-slate-50 border-t border-slate-100">
-                <a href="/admin/group/${encodeURIComponent(g.name)}" class="flex items-center justify-center w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 shadow-md transition">
+                <a href="/admin/group/${encodeURIComponent(g.name)}" class="flex items-center justify-center w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 shadow-[0_4px_15px_rgba(79,70,229,0.3)] hover:shadow-[0_6px_20px_rgba(79,70,229,0.4)] transition-all active:scale-[0.98]">
                     Manage Group <i class="fas fa-arrow-right ml-2"></i>
                 </a>
             </div>
@@ -79,14 +112,14 @@ adminApp.get('/', async (req, res) => {
     masters.forEach((m) => {
         masterOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`;
         mastersListHtml += `
-            <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-2">
+            <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-2 hover:shadow-md transition">
                 <div>
                     <span class="font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded text-xs mr-2">${m.name}</span> 
                     <span class="text-sm font-semibold text-slate-600">${m.ip}</span>
                 </div>
                 <form action="/admin/delete-master" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာလား?');" class="m-0">
                     <input type="hidden" name="id" value="${m._id}">
-                    <button type="submit" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg">
+                    <button type="submit" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg transition hover:bg-red-100">
                         <i class="fas fa-trash"></i>
                     </button>
                 </form>
@@ -99,94 +132,161 @@ adminApp.get('/', async (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>VPN Master Admin</title>
+            <title>QITO Tech Admin Panel</title>
             <script src="https://cdn.tailwindcss.com"></script>
             <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+            <style>
+                /* Premium Animations */
+                @keyframes fadeInUp {
+                    from { opacity: 0; transform: translateY(20px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .animate-fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
+                .delay-100 { animation-delay: 0.1s; }
+                .delay-200 { animation-delay: 0.2s; }
+            </style>
         </head>
-        <body class="bg-slate-50 font-sans pb-10">
-            <nav class="bg-gradient-to-r from-indigo-800 to-indigo-600 text-white shadow-lg p-5 mb-8">
-                <div class="max-w-7xl mx-auto flex items-center justify-between">
-                    <div class="font-black text-2xl tracking-tight">
-                        <i class="fas fa-shield-alt mr-2 text-indigo-300"></i> PROXY <span class="text-indigo-200 font-light">ADMIN</span>
+        <body class="bg-[#f8fafc] font-sans pb-10 selection:bg-indigo-500 selection:text-white">
+            
+            <nav class="bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-900 text-white shadow-xl p-5 mb-8 sticky top-0 z-40">
+                <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div class="font-black text-2xl tracking-tight flex items-center">
+                        <div class="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center mr-3 border border-indigo-400/30">
+                            <i class="fas fa-shield-alt text-indigo-400"></i>
+                        </div>
+                        QITO <span class="text-indigo-400 font-light ml-1">ADMIN</span>
                     </div>
+                    
+                    <form action="/admin/search" method="POST" class="w-full md:w-96 relative group">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <i class="fas fa-search text-slate-400 group-focus-within:text-indigo-400 transition"></i>
+                        </div>
+                        <input type="text" name="query" placeholder="Search by ssconf link or Token..." required class="w-full bg-slate-800/50 border border-slate-700 text-white text-sm rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block pl-10 p-3 transition-all outline-none placeholder-slate-500">
+                        <button type="submit" class="absolute inset-y-0 right-0 pr-3 flex items-center text-xs font-bold text-indigo-400 hover:text-indigo-300">FIND</button>
+                    </form>
                 </div>
             </nav>
 
             <div class="max-w-7xl mx-auto px-4">
                 
-                <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-8 flex flex-col md:flex-row gap-6">
-                    <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
-                        <label class="block text-lg font-black text-slate-800 mb-4">
-                            <i class="fas fa-key text-yellow-500 mr-2"></i> Save New Master API
-                        </label>
-                        <form action="/admin/add-master" method="POST" class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <input type="text" name="name" placeholder="Name (e.g., API-1)" required class="border-2 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800">
-                            <input type="text" name="ip" placeholder="URL (http://ip:8888)" required class="border-2 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800">
-                            <input type="password" name="apiKey" placeholder="API Key" required class="border-2 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800">
-                            <button type="submit" class="md:col-span-3 bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-black transition text-sm">
-                                <i class="fas fa-save mr-2"></i> Save Master API
-                            </button>
-                        </form>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10 animate-fade-in-up">
+                    
+                    <div class="lg:col-span-2 bg-white p-7 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6">
+                        <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
+                            <label class="block text-lg font-black text-slate-800 mb-5 flex items-center">
+                                <i class="fas fa-key text-yellow-500 mr-2 text-xl drop-shadow"></i> Save Master API
+                            </label>
+                            <form action="/admin/add-master" method="POST" class="grid grid-cols-1 gap-3">
+                                <input type="text" name="name" placeholder="Name (e.g., API-1)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                                <input type="text" name="ip" placeholder="URL (http://ip:8888)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                                <input type="password" name="apiKey" placeholder="API Key" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                                <button type="submit" class="mt-2 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]">
+                                    <i class="fas fa-save mr-2"></i> Save API
+                                </button>
+                            </form>
+                        </div>
+                        <div class="flex-1 pl-0 md:pl-2">
+                            <label class="block text-xs font-black text-slate-400 mb-3 uppercase tracking-widest">Saved APIs</label>
+                            <div class="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                                ${mastersListHtml || '<p class="text-sm text-slate-400 italic">No APIs saved yet.</p>'}
+                            </div>
+                        </div>
                     </div>
-                    <div class="flex-1 pl-0 md:pl-2">
-                        <label class="block text-sm font-black text-slate-500 mb-3 uppercase tracking-wider">Saved APIs</label>
-                        <div class="max-h-32 overflow-y-auto pr-2">
-                            ${mastersListHtml || '<p class="text-sm text-slate-400">No Master APIs saved yet.</p>'}
+
+                    <div class="bg-gradient-to-br from-indigo-50 to-blue-50 p-7 rounded-[2rem] shadow-sm border border-indigo-100">
+                        <div class="flex justify-between items-center mb-5">
+                            <label class="block text-lg font-black text-slate-800 flex items-center">
+                                <i class="fas fa-database text-indigo-500 mr-2 text-xl drop-shadow"></i> Backup & Restore
+                            </label>
+                            <form action="/admin/backup-all" method="POST" class="m-0">
+                                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-md transition active:scale-95" title="Backup Entire System">
+                                    <i class="fas fa-cloud-download-alt mr-1"></i> Full Backup
+                                </button>
+                            </form>
+                        </div>
+                        <div class="bg-white rounded-2xl p-3 border border-slate-200 shadow-inner h-60 overflow-y-auto">
+                            ${backupHtml}
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-white p-6 md:p-8 rounded-3xl shadow-lg border border-slate-100 mb-10">
-                    <label class="block text-lg font-black text-slate-800 mb-4">
-                        <i class="fas fa-network-wired text-indigo-500 mr-2"></i> Create Group
+                <div class="bg-white p-8 rounded-[2rem] shadow-md border border-slate-200 mb-10 animate-fade-in-up delay-100">
+                    <label class="block text-xl font-black text-slate-800 mb-6 flex items-center">
+                        <i class="fas fa-network-wired text-indigo-500 mr-3 text-2xl drop-shadow"></i> Create New Group
                     </label>
-                    <div class="flex flex-col md:flex-row gap-4 mb-6 pb-6 border-b border-slate-100">
+                    <div class="flex flex-col md:flex-row gap-4 mb-8 pb-8 border-b border-slate-100">
                         <div class="flex-1">
-                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">Select Master API</label>
-                            <select id="savedMasterSelector" class="w-full border-2 border-indigo-200 bg-indigo-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-indigo-800">
+                            <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Select Master API</label>
+                            <select id="savedMasterSelector" class="w-full border-2 border-indigo-200 bg-indigo-50/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-indigo-900 transition hover:bg-indigo-50">
                                 ${masterOptions}
                             </select>
                         </div>
                         <div class="flex items-end">
-                            <button type="button" onclick="fetchGroupsFromSaved()" id="fetchBtn" class="w-full md:w-auto bg-indigo-600 text-white px-8 py-3.5 rounded-xl font-bold hover:bg-indigo-700 transition">
+                            <button type="button" onclick="fetchGroupsFromSaved()" id="fetchBtn" class="w-full md:w-auto bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-indigo-700 transition shadow-[0_4px_15px_rgba(79,70,229,0.3)] active:scale-[0.98]">
                                 <i class="fas fa-sync-alt mr-2"></i> Fetch Groups
                             </button>
                         </div>
                     </div>
 
-                    <form action="/admin/create-group" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <form action="/admin/create-group" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-5">
                         <input type="hidden" name="masterIp" id="formMasterIp">
                         <input type="hidden" name="masterApiKey" id="formMasterApiKey">
                         <input type="hidden" name="masterName" id="formMasterName">
                         
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">1. Select Group</label>
-                            <select name="masterGroupId" id="masterGroupSelect" required class="w-full border-2 border-slate-200 bg-slate-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-semibold text-slate-700">
+                            <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">1. Select Group</label>
+                            <select name="masterGroupId" id="masterGroupSelect" required class="w-full border-2 border-slate-200 bg-slate-50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-slate-700 transition">
                                 <option value="" disabled selected>Fetch groups first...</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">2. Local Name</label>
-                            <input type="text" name="groupName" placeholder="e.g. VIP Gaming" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-slate-800">
+                            <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">2. Local Name</label>
+                            <input type="text" name="groupName" placeholder="e.g. VIP Gaming" required class="w-full border-2 border-slate-200 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-slate-800 transition">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">3. Custom DNS</label>
-                            <input type="text" name="nsRecord" placeholder="e.g. ns1.yourdomain.com" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-indigo-700">
+                            <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">3. Custom DNS</label>
+                            <input type="text" name="nsRecord" placeholder="e.g. ns1.domain.com" required class="w-full border-2 border-slate-200 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-indigo-700 transition">
                         </div>
                         <div class="flex items-end">
-                            <button type="submit" class="w-full bg-slate-800 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-black transition">
-                                <i class="fas fa-plus mr-2"></i> Create
+                            <button type="submit" class="w-full bg-slate-800 text-white px-6 py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]">
+                                <i class="fas fa-plus mr-2"></i> Create Group
                             </button>
                         </div>
                     </form>
                 </div>
                 
-                <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    ${groupsHtml || '<p class="col-span-full text-center py-10 text-slate-500">No groups found.</p>'}
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in-up delay-200">
+                    ${groupsHtml || '<div class="col-span-full bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-sm"><i class="fas fa-folder-open text-4xl text-slate-300 mb-3 block"></i><p class="text-slate-500 font-bold">No groups found. Create one above!</p></div>'}
+                </div>
+            </div>
+
+            <div id="deleteGroupModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 backdrop-blur-sm transition-opacity opacity-0 duration-300">
+                <div class="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-2xl border border-red-100 transform scale-95 transition-transform duration-300" id="deleteModalContent">
+                    <div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5 border-4 border-red-50">
+                        <i class="fas fa-exclamation-triangle text-red-500 text-3xl animate-pulse"></i>
+                    </div>
+                    <div class="text-center">
+                        <h3 class="text-2xl font-black text-slate-800 mb-2">WARNING!</h3>
+                        <p class="text-slate-500 text-sm font-semibold mb-6">
+                            Are you absolutely sure you want to delete <br>
+                            <b id="deleteModalGroupName" class="text-red-600 text-lg block mt-1">Group</b>? <br><br>
+                            <span class="text-xs text-red-400">All users in this group will also be permanently deleted!</span>
+                        </p>
+                        <form action="/admin/delete-group" method="POST" class="flex flex-col gap-3">
+                            <input type="hidden" name="groupName" id="deleteGroupNameInput">
+                            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-black py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(220,38,38,0.4)] active:scale-[0.98]">
+                                YES, DELETE FOREVER
+                            </button>
+                            <button type="button" onclick="closeDoubleConfirmModal()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">
+                                Cancel
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
 
             <script>
+                // Fetch Groups Logic
                 async function fetchGroupsFromSaved() {
                     const selector = document.getElementById('savedMasterSelector').value; 
                     const btn = document.getElementById('fetchBtn');
@@ -212,6 +312,7 @@ adminApp.get('/', async (req, res) => {
                             
                             document.getElementById('masterGroupSelect').innerHTML = options; 
                             document.getElementById('masterGroupSelect').classList.remove('bg-slate-50');
+                            document.getElementById('masterGroupSelect').classList.add('bg-white', 'border-indigo-300');
                             
                             document.getElementById('formMasterIp').value = ip; 
                             document.getElementById('formMasterApiKey').value = key; 
@@ -233,11 +334,113 @@ adminApp.get('/', async (req, res) => {
                         btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; 
                     }
                 }
+
+                // 🌟 Double Confirm Modal Logic
+                function openDoubleConfirmModal(groupName) {
+                    document.getElementById('deleteGroupNameInput').value = groupName;
+                    document.getElementById('deleteModalGroupName').innerText = groupName;
+                    const modal = document.getElementById('deleteGroupModal');
+                    const content = document.getElementById('deleteModalContent');
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                    setTimeout(() => {
+                        modal.classList.remove('opacity-0');
+                        content.classList.remove('scale-95');
+                    }, 10);
+                }
+
+                function closeDoubleConfirmModal() {
+                    const modal = document.getElementById('deleteGroupModal');
+                    const content = document.getElementById('deleteModalContent');
+                    modal.classList.add('opacity-0');
+                    content.classList.add('scale-95');
+                    setTimeout(() => {
+                        modal.classList.add('hidden');
+                        modal.classList.remove('flex');
+                    }, 300);
+                }
             </script>
         </body>
         </html>
     `);
 });
+
+// 🌟 SEARCH LOGIC 🌟
+adminApp.post('/search', async (req, res) => {
+    try {
+        const query = req.body.query.trim();
+        let token = query;
+        // Extract token if it's a full ssconf link
+        const match = query.match(/\/([A-Za-z0-9]+)\.json/);
+        if (match) token = match[1];
+
+        const user = await User.findOne({ token: token });
+        if (user) {
+            res.redirect('/admin/group/' + encodeURIComponent(user.groupName) + '?highlight=' + token);
+        } else {
+            res.send(`<script>alert('User or Token not found!'); window.location.href='/admin';</script>`);
+        }
+    } catch(e) {
+        res.redirect('/admin');
+    }
+});
+
+// 🌟 BACKUP LOGIC (FULL) 🌟
+adminApp.post('/backup-all', async (req, res) => {
+    try {
+        const groups = await Group.find({});
+        const masters = await Master.find({});
+        const users = await User.find({});
+        
+        const data = { type: 'full', date: new Date(), groups, masters, users };
+        const filename = `Full_Backup_${Date.now()}.json`;
+        
+        fs.writeFileSync(path.join(backupDir, filename), JSON.stringify(data, null, 2));
+        res.send(`<script>alert('Full Backup ယူပြီးပါပြီ!'); window.location.href='/admin';</script>`);
+    } catch (err) {
+        res.status(500).send("Error creating backup.");
+    }
+});
+
+// 🌟 RESTORE BACKUP LOGIC 🌟
+adminApp.post('/restore-backup', async (req, res) => {
+    try {
+        const { filename } = req.body;
+        const filePath = path.join(backupDir, filename);
+        if (!fs.existsSync(filePath)) return res.send("Backup file not found!");
+        
+        const rawData = fs.readFileSync(filePath);
+        const data = JSON.parse(rawData);
+
+        const cleanObj = (obj) => {
+            const { _id, __v, ...rest } = obj._doc || obj;
+            return rest;
+        };
+
+        if (data.type === 'full') {
+            if(data.groups) for (let g of data.groups) await Group.updateOne({name: g.name}, {$set: cleanObj(g)}, {upsert: true});
+            if(data.masters) for (let m of data.masters) await Master.updateOne({ip: m.ip}, {$set: cleanObj(m)}, {upsert: true});
+            if(data.users) for (let u of data.users) await User.updateOne({token: u.token}, {$set: cleanObj(u)}, {upsert: true});
+        } else if (data.type === 'group') {
+            if(data.group) await Group.updateOne({name: data.group.name}, {$set: cleanObj(data.group)}, {upsert: true});
+            if(data.users) for (let u of data.users) await User.updateOne({token: u.token}, {$set: cleanObj(u)}, {upsert: true});
+        }
+        res.send(`<script>alert('Backup ဖိုင် ပြန်လည်ဖြည့်သွင်းခြင်း အောင်မြင်ပါသည်!'); window.location.href='/admin';</script>`);
+    } catch (err) {
+        res.status(500).send("Error restoring backup: " + err.message);
+    }
+});
+
+// 🌟 DELETE BACKUP FILE 🌟
+adminApp.post('/delete-backup', (req, res) => {
+    try {
+        const { filename } = req.body;
+        const filePath = path.join(backupDir, filename);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        res.redirect('/admin');
+    } catch(e) { res.redirect('/admin'); }
+});
+
 
 adminApp.post('/add-master', async (req, res) => {
     try { 
@@ -246,7 +449,7 @@ adminApp.post('/add-master', async (req, res) => {
         await Master.create({ name, ip, apiKey }); 
         res.redirect('/admin'); 
     } catch (e) { 
-        res.status(500).send("Error saving Master. Name might be duplicate."); 
+        res.status(500).send("Error saving Master."); 
     }
 });
 
@@ -255,39 +458,29 @@ adminApp.post('/delete-master', async (req, res) => {
     res.redirect('/admin'); 
 });
 
-// 🌟 FETCH MASTER GROUPS FIX (Uses GET first, falls back to POST)
 adminApp.post('/api/fetch-master-groups', async (req, res) => {
     try { 
         let { masterIp, masterApiKey } = req.body; 
         masterIp = masterIp.replace(/\/$/, ""); 
         
-        // 1. Try GET Method first (Standard for fetching data)
         try {
             const response = await fetchWithRetry(masterIp + '/api/active-groups', null, { 
                 method: 'get',
                 headers: { 'x-api-key': masterApiKey }, 
                 timeout: 5000 
             });
-            
-            if (response.data && response.data.groups) { 
-                return res.json({ success: true, groups: response.data.groups }); 
-            }
+            if (response.data && response.data.groups) return res.json({ success: true, groups: response.data.groups }); 
         } catch (getErr) {
-            // 2. Fallback to POST Method if GET is blocked by Master Server
             const responsePost = await fetchWithRetry(masterIp + '/api/active-groups', {}, { 
                 method: 'post',
                 headers: { 'x-api-key': masterApiKey }, 
                 timeout: 5000 
             });
-            
-            if (responsePost.data && responsePost.data.groups) { 
-                return res.json({ success: true, groups: responsePost.data.groups }); 
-            } else {
-                throw new Error("Invalid API Response format from Master");
-            }
+            if (responsePost.data && responsePost.data.groups) return res.json({ success: true, groups: responsePost.data.groups }); 
+            else throw new Error("Invalid API Response");
         }
     } catch (error) { 
-        res.json({ success: false, error: error.message || "Failed to fetch groups from Master." }); 
+        res.json({ success: false, error: error.message || "Failed to fetch groups." }); 
     }
 });
 
@@ -327,10 +520,12 @@ adminApp.post('/delete-group', async (req, res) => {
 });
 
 // ==========================================
-// 2. INSIDE GROUP VIEW
+// 2. INSIDE GROUP VIEW (WITH GROUP BACKUP & HIGHLIGHT)
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
+    const highlightToken = req.query.highlight; // Highlighted token from Search
+    
     const groupInfo = await Group.findOne({ name: groupName });
     const users = await User.find({ groupName: groupName }).sort({ userNo: 1 }); 
     const masters = await Master.find({}); 
@@ -344,44 +539,45 @@ adminApp.get('/group/:name', async (req, res) => {
         const webPanelLink = `http://${panelHost}/panel/${u.token}`; 
         const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
         const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
+        
+        // Highlight Row Logic
+        const isHighlighted = (u.token === highlightToken) ? 'bg-yellow-100 border-l-4 border-yellow-500 animate-pulse transition-colors' : 'hover:bg-indigo-50/50';
 
         usersHtml += `
-        <tr class="border-b border-slate-50 hover:bg-indigo-50/30">
+        <tr id="user-${u.token}" class="border-b border-slate-100 ${isHighlighted} transition duration-300">
             <td class="p-4 text-slate-800 font-black">#${u.userNo || '-'}</td>
             <td class="p-4">
                 <div class="font-bold text-slate-800">${u.name}</div>
-                <div class="text-xs text-indigo-400 font-mono">${u.token}</div>
+                <div class="text-xs text-indigo-500 font-mono bg-indigo-50 px-2 py-0.5 rounded inline-block mt-1">${u.token}</div>
             </td>
             <td class="p-4">
-                <span class="bg-slate-100 px-2 py-1 rounded text-xs font-bold mr-2">${serverCount} Nodes</span>
-                <span class="text-sm font-semibold">${u.currentServer || 'None'}</span>
+                <span class="bg-slate-200 px-2 py-1 rounded text-[11px] font-black uppercase text-slate-600 mr-2">${serverCount} Nodes</span>
+                <span class="text-sm font-bold text-slate-700">${u.currentServer || 'None'}</span>
             </td>
             <td class="p-4 text-sm font-bold text-slate-600">${u.expireDate}</td>
             <td class="p-4 w-48">
-                <div class="flex justify-between text-xs mb-1 font-bold">
+                <div class="flex justify-between text-[11px] mb-1 font-bold uppercase tracking-wider">
                     <span class="text-indigo-600">${u.usedGB} GB</span>
-                    <span class="text-slate-500">${u.totalGB} GB</span>
+                    <span class="text-slate-400">${u.totalGB} GB</span>
                 </div>
-                <div class="w-full bg-slate-200 rounded-full h-1.5">
-                    <div class="bg-indigo-500 h-1.5 rounded-full" style="width: ${usagePercent}%"></div>
+                <div class="w-full bg-slate-200 rounded-full h-2 shadow-inner">
+                    <div class="bg-indigo-500 h-2 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.5)]" style="width: ${usagePercent}%"></div>
                 </div>
             </td>
             <td class="p-4 text-right flex justify-end gap-2">
-                <button id="panelBtn-${u.token}" onclick="copyLink('${webPanelLink}', 'panelBtn-${u.token}', '<i class=\\'fas fa-globe\\'></i>')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy Web Panel Link">
+                <button id="panelBtn-${u.token}" onclick="copyLink('${webPanelLink}', 'panelBtn-${u.token}', '<i class=\\'fas fa-globe\\'></i>')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Copy Web Panel Link">
                     <i class="fas fa-globe"></i>
                 </button>
-                <button id="btn-${u.token}" onclick="copyLink('${ssconfLink}', 'btn-${u.token}', '<i class=\\'fas fa-link\\'></i>')" class="bg-slate-100 text-slate-600 hover:bg-green-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Copy SSCONF Link">
+                <button id="btn-${u.token}" onclick="copyLink('${ssconfLink}', 'btn-${u.token}', '<i class=\\'fas fa-link\\'></i>')" class="bg-teal-50 text-teal-600 hover:bg-teal-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Copy SSCONF Link">
                     <i class="fas fa-link"></i>
                 </button>
-                
-                <button onclick="openEditModal('${u.token}', '${u.totalGB}', '${u.expireDate}')" class="bg-yellow-50 text-yellow-600 hover:bg-yellow-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Edit User">
+                <button onclick="openEditModal('${u.token}', '${u.totalGB}', '${u.expireDate}')" class="bg-yellow-50 text-yellow-600 hover:bg-yellow-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Edit User">
                     <i class="fas fa-edit"></i>
                 </button>
-
                 <form action="/admin/delete-user" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာပြီလား?');" class="m-0">
                     <input type="hidden" name="token" value="${u.token}">
                     <input type="hidden" name="groupName" value="${u.groupName}">
-                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition" title="Delete User">
+                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Delete User">
                         <i class="fas fa-trash"></i>
                     </button>
                 </form>
@@ -403,110 +599,137 @@ adminApp.get('/group/:name', async (req, res) => {
             <title>Group Management</title>
             <script src="https://cdn.tailwindcss.com"></script>
             <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+            <style>
+                @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+                .animate-fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
+            </style>
         </head>
-        <body class="bg-slate-50 font-sans pb-10">
-            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-6">
+        <body class="bg-[#f8fafc] font-sans pb-10">
+            
+            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8 sticky top-0 z-40">
                 <div class="max-w-7xl mx-auto flex items-center justify-between">
                     <div class="flex items-center">
-                        <a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl">
+                        <a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl transition transform hover:-translate-x-1">
                             <i class="fas fa-arrow-left"></i>
                         </a>
-                        <span class="font-black text-xl">${groupName}</span>
-                        <span class="ml-3 text-xs font-bold text-white bg-indigo-500 px-2 py-1 rounded shadow-sm">
+                        <span class="font-black text-2xl text-slate-800">${groupName}</span>
+                        <span class="ml-3 text-[10px] font-black text-white bg-indigo-500 px-2 py-1 rounded shadow-sm uppercase tracking-widest">
                             ${groupInfo.masterName || 'API'}
                         </span>
                     </div>
                     <div class="flex items-center gap-3">
-                        <div class="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                        <div class="hidden md:block text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-xl border border-slate-200">
                             <i class="fas fa-link text-indigo-400 mr-1"></i> ${groupInfo.masterIp || 'Not Linked'}
                         </div>
                         
+                        <form action="/admin/backup-group" method="POST" class="m-0">
+                            <input type="hidden" name="groupName" value="${groupName}">
+                            <button type="submit" class="bg-blue-100 text-blue-700 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm border border-blue-200 flex items-center" title="Backup this specific group">
+                                <i class="fas fa-save mr-2"></i> Backup Group
+                            </button>
+                        </form>
+
                         <form action="/admin/sync-group-nodes" method="POST" class="m-0" onsubmit="this.querySelector('button').innerHTML='<i class=\\'fas fa-spinner fa-spin mr-2\\'></i> Syncing...';">
                             <input type="hidden" name="groupName" value="${groupName}">
-                            <button type="submit" class="bg-indigo-100 text-indigo-700 hover:bg-indigo-600 hover:text-white px-4 py-1.5 rounded-lg text-sm font-bold transition shadow-sm border border-indigo-200 flex items-center" title="Pull latest nodes from Master">
-                                <i class="fas fa-sync-alt mr-2"></i> Sync All Nodes
+                            <button type="submit" class="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 rounded-xl text-sm font-bold transition shadow-[0_4px_14px_rgba(79,70,229,0.3)] active:scale-95 flex items-center">
+                                <i class="fas fa-sync-alt mr-2"></i> Sync Nodes
                             </button>
                         </form>
                     </div>
                 </div>
             </nav>
 
-            <div class="max-w-7xl mx-auto px-4">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border p-6">
-                        <label class="block text-sm font-black text-slate-800 mb-4"><i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key</label>
-                        <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div class="max-w-7xl mx-auto px-4 animate-fade-in-up">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                    <div class="md:col-span-2 bg-white rounded-[2rem] shadow-sm border border-slate-200 p-8">
+                        <label class="block text-lg font-black text-slate-800 mb-5"><i class="fas fa-user-plus text-green-500 mr-2 drop-shadow"></i> Generate New Key</label>
+                        <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <input type="hidden" name="groupName" value="${groupName}">
-                            <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
-                            <input type="number" name="totalGB" placeholder="Data (GB)" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
-                            <input type="date" name="expireDate" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-600">
-                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">Create</button>
+                            <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                            <input type="number" name="totalGB" placeholder="Data (GB)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                            <input type="date" name="expireDate" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-600 transition">
+                            <button type="submit" class="bg-indigo-600 text-white rounded-2xl py-3.5 font-bold hover:bg-indigo-700 transition text-sm shadow-[0_4px_15px_rgba(79,70,229,0.3)] active:scale-[0.98]">Add User</button>
                         </form>
                     </div>
 
-                    <div class="bg-yellow-50 rounded-2xl shadow-sm border border-yellow-200 p-6">
-                        <label class="block text-sm font-black text-yellow-800 mb-2"><i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection</label>
-                        <form action="/admin/update-group-master" method="POST" class="flex flex-col gap-2">
+                    <div class="bg-gradient-to-br from-yellow-50 to-orange-50 rounded-[2rem] shadow-sm border border-yellow-200 p-8">
+                        <label class="block text-lg font-black text-yellow-800 mb-4"><i class="fas fa-plug text-yellow-600 mr-2 drop-shadow"></i> Update Connection</label>
+                        <form action="/admin/update-group-master" method="POST" class="flex flex-col gap-3">
                             <input type="hidden" name="groupName" value="${groupName}">
-                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">${relinkOptions}</select>
-                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">Re-Link Master</button>
+                            <select name="masterData" required class="w-full border-2 border-yellow-300 bg-white p-3 rounded-2xl outline-none focus:border-yellow-500 font-bold text-sm text-slate-700 transition">${relinkOptions}</select>
+                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-2xl py-3.5 font-bold hover:bg-yellow-600 transition text-sm shadow-md active:scale-[0.98]">Re-Link Master</button>
                         </form>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
-                    <table class="w-full text-left">
-                        <thead>
-                            <tr class="bg-slate-100 text-xs uppercase text-slate-500">
-                                <th class="p-4">ID</th>
-                                <th class="p-4">User</th>
-                                <th class="p-4">Node</th>
-                                <th class="p-4">Expire</th>
-                                <th class="p-4">Usage</th>
-                                <th class="p-4 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${usersHtml}
-                        </tbody>
-                    </table>
+                <div class="bg-white rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left min-w-[800px]">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-widest text-slate-400 font-black">
+                                    <th class="p-5">ID</th>
+                                    <th class="p-5">User Info</th>
+                                    <th class="p-5">Current Node</th>
+                                    <th class="p-5">Expire Date</th>
+                                    <th class="p-5">Data Usage</th>
+                                    <th class="p-5 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${usersHtml}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <div id="editModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 backdrop-blur-sm transition-opacity">
-                <div class="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100">
-                    <div class="flex justify-between items-center mb-5 border-b border-slate-100 pb-3">
-                        <h3 class="text-lg font-black text-slate-800"><i class="fas fa-user-edit text-indigo-500 mr-2"></i> Edit User Data</h3>
-                        <button onclick="closeEditModal()" class="text-slate-400 hover:text-red-500 transition"><i class="fas fa-times text-xl"></i></button>
+            <div id="editModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 backdrop-blur-sm transition-opacity opacity-0 duration-300">
+                <div class="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl border border-slate-100 transform scale-95 transition-transform duration-300" id="editModalContent">
+                    <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                        <h3 class="text-xl font-black text-slate-800"><i class="fas fa-user-edit text-indigo-500 mr-2"></i> Edit User</h3>
+                        <button onclick="closeEditModal()" class="text-slate-400 hover:text-red-500 transition bg-slate-100 w-8 h-8 rounded-full flex items-center justify-center"><i class="fas fa-times"></i></button>
                     </div>
-                    <form action="/admin/edit-user" method="POST" class="flex flex-col gap-4">
+                    <form action="/admin/edit-user" method="POST" class="flex flex-col gap-5">
                         <input type="hidden" name="groupName" value="${groupName}">
                         <input type="hidden" name="oldToken" id="editOldToken">
                         
                         <div>
-                            <label class="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Token (Link ID)</label>
-                            <input type="text" name="newToken" id="editNewToken" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-mono text-sm text-slate-700 bg-slate-50">
+                            <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Token (Link ID)</label>
+                            <input type="text" name="newToken" id="editNewToken" required class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-mono text-sm text-slate-700 bg-slate-50">
                         </div>
-                        <div class="flex gap-3">
+                        <div class="flex gap-4">
                             <div class="flex-1">
-                                <label class="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Total GB</label>
-                                <input type="number" name="newTotalGB" id="editTotalGB" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-700">
+                                <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Total GB</label>
+                                <input type="number" name="newTotalGB" id="editTotalGB" required class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-700">
                             </div>
                             <div class="flex-1">
-                                <label class="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Expire Date</label>
-                                <input type="date" name="newExpireDate" id="editExpireDate" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-700">
+                                <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Expire Date</label>
+                                <input type="date" name="newExpireDate" id="editExpireDate" required class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-700">
                             </div>
                         </div>
                         <div class="flex gap-3 mt-4 pt-4 border-t border-slate-100">
-                            <button type="button" onclick="closeEditModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition">Cancel</button>
-                            <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition shadow-[0_4px_14px_rgba(79,70,229,0.4)]">Save Changes</button>
+                            <button type="button" onclick="closeEditModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">Cancel</button>
+                            <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(79,70,229,0.3)] active:scale-[0.98]">Save Changes</button>
                         </div>
                     </form>
                 </div>
             </div>
 
             <script>
-                // Form interactions
+                // Auto scroll to highlighted user from Search
+                window.onload = () => {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const highlight = urlParams.get('highlight');
+                    if (highlight) {
+                        const el = document.getElementById('user-' + highlight);
+                        if (el) {
+                            setTimeout(() => {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 500);
+                        }
+                    }
+                };
+
                 function openEditModal(token, gb, expire) {
                     document.getElementById('editOldToken').value = token;
                     document.getElementById('editNewToken').value = token;
@@ -514,17 +737,26 @@ adminApp.get('/group/:name', async (req, res) => {
                     document.getElementById('editExpireDate').value = expire;
                     
                     const modal = document.getElementById('editModal');
+                    const content = document.getElementById('editModalContent');
                     modal.classList.remove('hidden');
                     modal.classList.add('flex');
+                    setTimeout(() => {
+                        modal.classList.remove('opacity-0');
+                        content.classList.remove('scale-95');
+                    }, 10);
                 }
 
                 function closeEditModal() {
                     const modal = document.getElementById('editModal');
-                    modal.classList.add('hidden');
-                    modal.classList.remove('flex');
+                    const content = document.getElementById('editModalContent');
+                    modal.classList.add('opacity-0');
+                    content.classList.add('scale-95');
+                    setTimeout(() => {
+                        modal.classList.add('hidden');
+                        modal.classList.remove('flex');
+                    }, 300);
                 }
 
-                // Copy logic
                 function copyLink(link, btnId, origHtml) {
                     var tempInput = document.createElement("input"); 
                     tempInput.value = link; 
@@ -546,6 +778,23 @@ adminApp.get('/group/:name', async (req, res) => {
         </body>
         </html>
     `);
+});
+
+// 🌟 GROUP BACKUP LOGIC 🌟
+adminApp.post('/backup-group', async (req, res) => {
+    try {
+        const groupName = req.body.groupName;
+        const group = await Group.findOne({ name: groupName });
+        const users = await User.find({ groupName: groupName });
+        
+        const data = { type: 'group', groupName: groupName, date: new Date(), group, users };
+        const filename = `Group_${groupName}_${Date.now()}.json`.replace(/\s+/g, '_');
+        
+        fs.writeFileSync(path.join(backupDir, filename), JSON.stringify(data, null, 2));
+        res.send(`<script>alert('${groupName} Group Backup ယူပြီးပါပြီ!'); window.location.href='/admin/group/${encodeURIComponent(groupName)}';</script>`);
+    } catch (err) {
+        res.status(500).send("Error creating group backup.");
+    }
 });
 
 adminApp.post('/edit-user', async (req, res) => {
@@ -574,7 +823,6 @@ adminApp.post('/edit-user', async (req, res) => {
     }
 });
 
-// BATCH SYNC ALL NODES
 adminApp.post('/sync-group-nodes', async (req, res) => {
     try {
         const groupName = req.body.groupName;
@@ -689,9 +937,7 @@ adminApp.post('/delete-user', async (req, res) => {
                     { username: user.name, token: token },
                     { headers: { 'x-api-key': groupInfo.masterApiKey } }
                 ); 
-            } catch(e) { 
-                console.error(`❌ Master Delete Failed for ${user.name}`); 
-            }
+            } catch(e) {}
         }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
