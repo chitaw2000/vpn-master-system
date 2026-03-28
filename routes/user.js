@@ -21,7 +21,6 @@ async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
 // ==========================================
 // 1. PING FETCH API (Background Task)
 // ==========================================
-// User တွေရဲ့ App ထဲကနေ Ping ကို နောက်ကွယ်ကနေ တိတ်တိတ်လေး လှမ်းတောင်းမည့် API (Page မထစ်စေရန်)
 userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
     try {
         const { token, nodeName } = req.params;
@@ -31,11 +30,10 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         if (!group || !group.masterIp) return res.json({ status: 'offline' });
 
-        // Master Panel ဆီသို့ Ping လှမ်းတောင်းမည်
         const url = `${group.masterIp}/api/ping/${encodeURIComponent(nodeName)}`;
         const response = await axios.get(url, {
             headers: { 'x-api-key': group.masterApiKey },
-            timeout: 4000 // ၄ စက္ကန့်အတွင်း မရရင် Offline ပြမည်
+            timeout: 4000 
         });
 
         res.json(response.data);
@@ -45,7 +43,7 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
 });
 
 // ==========================================
-// 2. USER WEB PANEL (PREMIUM DARK MODE UI)
+// 2. USER WEB PANEL (PREMIUM UI)
 // ==========================================
 userApp.get('/panel/:token', async (req, res) => {
     try {
@@ -57,24 +55,30 @@ userApp.get('/panel/:token', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
 
+        // 🌟 One-Click App Import Links တည်ဆောက်ခြင်း
+        const encodedName = encodeURIComponent(user.name.replace(/\s+/g, ''));
+        const httpLink = `http://${domainName}/${token}.json#VPN-${encodedName}`; // Standard Link
+        const ssconfLink = `ssconf://${domainName}/${token}.json#VPN-${encodedName}`; // Outline Link
+        const hiddifyLink = `hiddify://import/${httpLink}`; // Hiddify Deep Link
+
         // 🌟 Premium Server List တည်ဆောက်ခြင်း
         let nodesListHtml = '';
-        let nodeNames = []; // Javascript ဖြင့် Ping လှမ်းခေါ်ရန် သိမ်းထားမည်
+        let nodeNames = []; 
         
         if (user.accessKeys && Object.keys(user.accessKeys).length > 0) {
             Object.keys(user.accessKeys).forEach(serverName => {
                 nodeNames.push(serverName);
                 const isSelected = user.currentServer === serverName;
                 
-                // ရွေးချယ်ထားသော Server ဖြစ်ပါက အရောင်ကွဲပြားစေမည်
                 const activeClass = isSelected ? 'bg-indigo-900/30 border-l-4 border-indigo-500' : 'hover:bg-slate-800/50';
                 const iconColor = isSelected ? 'text-indigo-400' : 'text-slate-400';
                 const checkIcon = isSelected ? 
                     `<i class="fas fa-check-circle text-indigo-500 text-lg"></i>` : 
                     `<i class="fas fa-arrow-circle-right text-slate-600 hover:text-slate-400 transition text-lg"></i>`;
 
+                // 🌟 Server Switch Confirmation (သေချာလား မေးမည့်စနစ် ထည့်ထားသည်)
                 nodesListHtml += `
-                <form action="/panel/change-server" method="POST" class="m-0 border-b border-slate-800 last:border-0">
+                <form action="/panel/change-server" method="POST" class="m-0 border-b border-slate-800 last:border-0" onsubmit="return confirm('ဒီ Server ကို တကယ် ပြောင်းမှာ သေချာပြီလား? ⚡');">
                     <input type="hidden" name="token" value="${token}">
                     <input type="hidden" name="newServer" value="${serverName}">
                     <button type="submit" class="w-full flex justify-between items-center p-4 transition-all duration-200 ${activeClass}">
@@ -98,7 +102,6 @@ userApp.get('/panel/:token', async (req, res) => {
             nodesListHtml = `<div class="p-6 text-center text-slate-500 font-medium">No Servers Available</div>`; 
         }
 
-        const ssconfLink = `ssconf://${domainName}/${token}.json#VPN-${encodeURIComponent(user.name.replace(/\s+/g, ''))}`;
         const usagePercent = user.totalGB > 0 ? ((user.usedGB / user.totalGB) * 100).toFixed(1) : 0;
 
         res.send(`
@@ -111,7 +114,7 @@ userApp.get('/panel/:token', async (req, res) => {
                 <script src="https://cdn.tailwindcss.com"></script>
                 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
                 <style>
-                    body { background-color: #0b1121; } /* Dark Navy Background */
+                    body { background-color: #0b1121; } 
                 </style>
             </head>
             <body class="text-slate-200 font-sans min-h-screen pb-10 selection:bg-indigo-500 selection:text-white">
@@ -120,7 +123,7 @@ userApp.get('/panel/:token', async (req, res) => {
                     <div class="flex justify-between items-center mb-6">
                         <div>
                             <h1 class="text-2xl font-black text-white tracking-tight">Premium<span class="text-indigo-500">VPN</span></h1>
-                            <p class="text-sm font-medium text-slate-400 mt-1">ID: <span class="text-slate-300">${user.name}</span></p>
+                            <p class="text-sm font-medium text-slate-400 mt-1">Username: <span class="text-slate-300">${user.name}</span></p>
                         </div>
                         <div class="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
                             <i class="fas fa-crown text-yellow-500 text-sm"></i>
@@ -144,8 +147,17 @@ userApp.get('/panel/:token', async (req, res) => {
                         </div>
                     </div>
 
-                    <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-[0_4px_14px_rgba(79,70,229,0.4)] mb-8 transition-all active:scale-[0.98] flex justify-center items-center gap-2">
-                        <i class="fas fa-link text-lg"></i> COPY SUBSCRIPTION LINK
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <a href="${ssconfLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3 px-2 rounded-2xl flex items-center justify-center gap-2 transition active:scale-95 shadow-sm">
+                            <i class="fas fa-key text-teal-400 text-lg"></i> Outline
+                        </a>
+                        <a href="${hiddifyLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3 px-2 rounded-2xl flex items-center justify-center gap-2 transition active:scale-95 shadow-sm">
+                            <i class="fas fa-rocket text-blue-400 text-lg"></i> Hiddify
+                        </a>
+                    </div>
+
+                    <button id="copyBtn" onclick="copyLink('${httpLink}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-2xl shadow-[0_4px_14px_rgba(79,70,229,0.4)] mb-8 transition-all active:scale-[0.98] flex justify-center items-center gap-2">
+                        <i class="fas fa-copy text-lg"></i> COPY SUBSCRIPTION
                     </button>
 
                     <h3 class="text-[13px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Available Servers</h3>
@@ -169,16 +181,13 @@ userApp.get('/panel/:token', async (req, res) => {
                     async function fetchPings() {
                         for(let node of nodes) {
                             try {
-                                // Request ping from sub-panel (which requests from master)
                                 let res = await fetch('/panel/api/ping/' + token + '/' + encodeURIComponent(node));
                                 let data = await res.json();
                                 
-                                // ID အတွက် Space များကို '-' အဖြစ် ပြောင်းထားသည်
                                 let safeNodeId = node.replace(/\\s+/g, '-');
                                 let pingEl = document.getElementById('ping-' + safeNodeId);
 
                                 if(data.status === 'online' && data.latency_ms) {
-                                    // Premium Ping Style (e.g., ((•)) 48ms )
                                     let latency = Math.round(data.latency_ms);
                                     let color = latency < 100 ? 'text-green-500' : (latency < 200 ? 'text-yellow-500' : 'text-red-500');
                                     pingEl.innerHTML = \`<span class="\${color} font-bold"><i class="fas fa-wifi text-[10px] mr-1"></i>\${latency}ms</span>\`;
@@ -192,7 +201,6 @@ userApp.get('/panel/:token', async (req, res) => {
                         }
                     }
 
-                    // Copy Link Function
                     function copyLink(link) { 
                         var t = document.createElement("input"); 
                         t.value = link; 
@@ -208,14 +216,13 @@ userApp.get('/panel/:token', async (req, res) => {
                         btn.classList.replace('shadow-[0_4px_14px_rgba(79,70,229,0.4)]', 'shadow-[0_4px_14px_rgba(20,184,166,0.4)]');
                         
                         setTimeout(() => { 
-                            btn.innerHTML = '<i class="fas fa-link text-lg"></i> COPY SUBSCRIPTION LINK'; 
+                            btn.innerHTML = '<i class="fas fa-copy text-lg"></i> COPY SUBSCRIPTION'; 
                             btn.classList.replace('bg-teal-500', 'bg-indigo-600'); 
                             btn.classList.replace('hover:bg-teal-400', 'hover:bg-indigo-500');
                             btn.classList.replace('shadow-[0_4px_14px_rgba(20,184,166,0.4)]', 'shadow-[0_4px_14px_rgba(79,70,229,0.4)]');
                         }, 3000); 
                     }
 
-                    // Page ပွင့်ပြီး ၅၀၀ ms အကြာတွင် Ping စတင်ခေါ်မည်
                     setTimeout(fetchPings, 500);
                 </script>
             </body>
