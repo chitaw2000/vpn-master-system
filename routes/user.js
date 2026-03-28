@@ -43,7 +43,7 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
 });
 
 // ==========================================
-// 2. USER WEB PANEL (PREMIUM UI WITH CUSTOM MODAL)
+// 2. USER WEB PANEL (PREMIUM UI)
 // ==========================================
 userApp.get('/panel/:token', async (req, res) => {
     try {
@@ -55,12 +55,14 @@ userApp.get('/panel/:token', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
 
-        // 🌟 One-Click App Import Links (SSCONF အသုံးပြုထားသည်)
+        // 🌟 One-Click App Import Links တည်ဆောက်ခြင်း
         const encodedName = encodeURIComponent(user.name.replace(/\s+/g, ''));
-        const ssconfLink = `ssconf://${domainName}/${token}.json#VPN-${encodedName}`; 
         
-        // Hiddify တွင် import လုပ်ရန် ssconf link ကို အသုံးပြုသည်
-        const hiddifyLink = `hiddify://import/${ssconfLink}`; 
+        // 🌟 SSCONF Protocol (with Capitalized Config Name: QitoVPN)
+        const ssconfLink = `ssconf://${domainName}/${token}.json#QitoVPN_${encodedName}`; 
+        
+        // Hiddify is standard subscription compatible, directly using HTTP
+        const hiddifyDeepLink = `hiddify://import/http://${domainName}/${token}.json`; 
 
         // 🌟 Premium Server List တည်ဆောက်ခြင်း
         let nodesListHtml = '';
@@ -106,8 +108,12 @@ userApp.get('/panel/:token', async (req, res) => {
 
         const usagePercent = user.totalGB > 0 ? ((user.usedGB / user.totalGB) * 100).toFixed(1) : 0;
 
-        // 🌟 သင်၏ Logo Link ကို အောက်ပါ နေရာတွင် အစားထိုးနိုင်ပါသည်
-        const logoUrl = "https://via.placeholder.com/150x150/1e293b/6366f1?text=QT"; 
+        // 🌟 အစ်ကို့ Logo Link ကို အသုံးပြုထားသည်
+        const logoUrl = "https://i.postimg.cc/G2FPpD7C/QUITO-profile-1.png"; 
+
+        // 🌟 App Logos လင့်ခ်များကို အသုံးပြုထားသည်
+        const outlineIconUrl = "https://i.postimg.cc/rm7q3wKz/images-(23).jpg";
+        const hiddifyIconUrl = "https://i.postimg.cc/kXQ7Y99g/images-(6).png";
 
         res.send(`
             <!DOCTYPE html>
@@ -162,11 +168,11 @@ userApp.get('/panel/:token', async (req, res) => {
 
                     <div class="grid grid-cols-2 gap-3 mb-3">
                         <a href="${ssconfLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3.5 px-2 rounded-2xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md">
-                            <img src="https://raw.githubusercontent.com/Jigsaw-Code/outline-client/master/scripts/apple_icon_1024.png" class="w-5 h-5 rounded" onerror="this.src=''; this.className='hidden';"> 
+                            <img src="${outlineIconUrl}" class="w-5 h-5 rounded object-cover shadow-sm">
                             <span class="tracking-wide">Outline</span>
                         </a>
-                        <a href="${hiddifyLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3.5 px-2 rounded-2xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md">
-                            <i class="fas fa-paper-plane text-blue-400 text-lg"></i> 
+                        <a href="${hiddifyDeepLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3.5 px-2 rounded-2xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md">
+                            <img src="${hiddifyIconUrl}" class="w-5 h-5 rounded object-cover shadow-sm">
                             <span class="tracking-wide">Hiddify</span>
                         </a>
                     </div>
@@ -396,8 +402,7 @@ userApp.get('/:token.json', async (req, res) => {
                     server: rawConfig.server, 
                     server_port: Number(rawConfig.server_port), 
                     password: rawConfig.password, 
-                    method: rawConfig.method, 
-                    prefix: rawConfig.prefix || "" 
+                    method: rawConfig.method
                 }; 
             }
             
