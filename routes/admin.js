@@ -238,7 +238,7 @@ adminApp.post('/add-master', async (req, res) => {
         await Master.create({ name, ip, apiKey }); 
         res.redirect('/admin'); 
     } catch (e) { 
-        res.status(500).send("Error saving Master."); 
+        res.status(500).send("Error saving Master. Name might be duplicate."); 
     }
 });
 
@@ -449,7 +449,7 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟🌟 NEW: BATCH SYNC ALL NODES API 🌟🌟
+// 🌟🌟 NEW: FORCE DATABASE MERGE FOR SYNC ALL NODES 🌟🌟
 adminApp.post('/sync-group-nodes', async (req, res) => {
     try {
         const groupName = req.body.groupName;
@@ -457,28 +457,34 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
         if (!groupInfo || !groupInfo.masterIp) return res.redirect('/admin');
 
         const users = await User.find({ groupName: groupName });
-        
-        // 🌟 ၅ ယောက်တစ်သုတ် (Batch Processing) ဖြင့် ဆွဲယူမည် (Master ဆာဗာ Down မသွားအောင်)
         const batchSize = 5;
+        
         for (let i = 0; i < users.length; i += batchSize) {
             const batch = users.slice(i, i + batchSize);
             await Promise.all(batch.map(async (user) => {
                 try {
-                    // Node အားလုံးအပြည့်အစုံရမည့် လမ်းကြောင်းကို ပြန်လည်အသုံးပြုထားပါသည်
                     const masterResponse = await fetchWithRetry(groupInfo.masterIp + '/api/generate-keys', {
                         masterGroupId: groupInfo.masterGroupId, 
                         userName: user.name, 
                         totalGB: user.totalGB, 
                         expireDate: user.expireDate
-                    }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 6000 }); // 6s timeout
+                    }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 8000 });
 
                     if (masterResponse.data && masterResponse.data.keys) {
-                        user.accessKeys = masterResponse.data.keys;
-                        if (!user.accessKeys[user.currentServer]) {
-                            user.currentServer = Object.keys(user.accessKeys)[0] || "None";
+                        
+                        // 🌟 1. Merge Old and New Keys
+                        const mergedKeys = { ...(user.accessKeys || {}), ...masterResponse.data.keys };
+                        let currentNode = user.currentServer;
+
+                        if (!mergedKeys[currentNode]) {
+                            currentNode = Object.keys(mergedKeys)[0] || "None";
                         }
-                        user.markModified('accessKeys');
-                        await user.save();
+
+                        // 🌟 2. Force Database Update ($set) to bypass Mongo Mixed Type ignore issue
+                        await User.updateOne(
+                            { _id: user._id },
+                            { $set: { accessKeys: mergedKeys, currentServer: currentNode } }
+                        );
                     }
                 } catch (err) {
                     console.log(`❌ Failed to sync nodes for user: ${user.name}`);
@@ -574,6 +580,7 @@ adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
     }
 });
 
+// 🌟🌟 NEW: FORCE UPDATE FOR AUTO SYNC WEBHOOK 🌟🌟
 adminApp.post('/api/internal/sync-new-server', async (req, res) => {
     try {
         const apiKey = req.headers['x-api-key'];
@@ -587,10 +594,15 @@ adminApp.post('/api/internal/sync-new-server', async (req, res) => {
         for (const [identifier, newConfig] of Object.entries(userKeys)) {
             const user = await User.findOne({ $or: [{ token: identifier }, { name: identifier }] });
             if (user) {
-                if (!user.accessKeys) user.accessKeys = {};
-                user.accessKeys[newServerName] = newConfig;
-                user.markModified('accessKeys'); 
-                await user.save();
+                
+                // 🌟 Force Database Update ($set) 🌟
+                const updatedKeys = { ...(user.accessKeys || {}) };
+                updatedKeys[newServerName] = newConfig;
+
+                await User.updateOne(
+                    { _id: user._id },
+                    { $set: { accessKeys: updatedKeys } }
+                );
             }
         }
         return res.json({ success: true, message: "Server synced successfully" });
