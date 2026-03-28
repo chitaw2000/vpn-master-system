@@ -5,9 +5,6 @@ const adminApp = express.Router();
 const Group = require('../models/Group');
 const User = require('../models/User');
 
-// ==========================================
-// 1. HOME DASHBOARD (Multi-Master UI)
-// ==========================================
 adminApp.get('/', async (req, res) => {
     const groups = await Group.find({});
     let groupsHtml = '';
@@ -17,8 +14,13 @@ adminApp.get('/', async (req, res) => {
         groupsHtml += `
         <div class="bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 border border-slate-100 overflow-hidden flex flex-col">
             <div class="bg-gradient-to-r from-slate-800 to-slate-700 p-4 flex justify-between items-center">
-                <h3 class="text-lg font-bold text-white"><i class="fas fa-server text-indigo-400 mr-2"></i> ${g.name}</h3>
-                <form action="/admin/delete-group" method="POST" onsubmit="return confirm('⚠️ သတိပေးချက်: ဒီ Group နဲ့ အထဲက User တွေအကုန်လုံးကို ဖျက်မှာ သေချာပြီလား?');" class="m-0">
+                <h3 class="text-lg font-bold text-white flex items-center">
+                    <i class="fas fa-server text-indigo-400 mr-2"></i> ${g.name}
+                    <span class="ml-3 text-xs font-black bg-indigo-500 text-white px-2 py-1 rounded-md border border-indigo-400 shadow-sm">
+                        API - ${g.masterName || '1'}
+                    </span>
+                </h3>
+                <form action="/admin/delete-group" method="POST" onsubmit="return confirm('⚠️ သတိပေးချက်: ဒီ Group ကို ဖျက်မှာ သေချာပြီလား?');" class="m-0">
                     <input type="hidden" name="groupName" value="${g.name}">
                     <button type="submit" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition" title="Delete Group"><i class="fas fa-trash-alt"></i></button>
                 </form>
@@ -26,7 +28,7 @@ adminApp.get('/', async (req, res) => {
             <div class="p-5 flex-1">
                 <div class="flex items-center justify-between mb-3 border-b border-slate-50 pb-3">
                     <span class="text-xs text-slate-400 font-semibold uppercase">Master IP</span>
-                    <span class="text-xs font-bold text-slate-600 truncate w-32 text-right">${g.masterIp}</span>
+                    <span class="text-xs font-bold text-slate-600 truncate w-32 text-right">${g.masterIp || 'N/A'}</span>
                 </div>
                 <div class="flex items-center justify-between mb-4">
                     <span class="text-xs text-slate-400 font-semibold uppercase">Custom DNS</span>
@@ -52,13 +54,13 @@ adminApp.get('/', async (req, res) => {
                 <div class="max-w-7xl mx-auto font-black text-2xl tracking-tight"><i class="fas fa-shield-alt mr-2 text-indigo-300"></i> PROXY <span class="text-indigo-200 font-light">ADMIN</span></div>
             </nav>
             <div class="max-w-7xl mx-auto px-4">
-                
                 <div class="bg-white p-6 md:p-8 rounded-3xl shadow-lg border border-slate-100 mb-10">
-                    <label class="block text-lg font-black text-slate-800 mb-4 flex items-center">
-                        <i class="fas fa-network-wired text-indigo-500 mr-2"></i> Connect Master & Create Group
-                    </label>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 pb-6 border-b border-slate-100">
+                    <label class="block text-lg font-black text-slate-800 mb-4 flex items-center"><i class="fas fa-network-wired text-indigo-500 mr-2"></i> Connect Master & Create Group</label>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 pb-6 border-b border-slate-100">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1 uppercase text-indigo-600">API No.</label>
+                            <input type="text" id="apiMasterName" placeholder="e.g. 1" value="1" class="w-full border-2 border-indigo-200 bg-indigo-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-black text-indigo-800">
+                        </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">Master URL / IP</label>
                             <input type="text" id="apiMasterIp" placeholder="http://168.144.33.53:8888" class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-slate-800">
@@ -68,21 +70,17 @@ adminApp.get('/', async (req, res) => {
                             <input type="password" id="apiMasterKey" placeholder="Your API Key" class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-slate-800">
                         </div>
                         <div class="flex items-end">
-                            <button type="button" onclick="fetchMasterGroups(this)" class="w-full bg-indigo-600 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-indigo-700 transition">
-                                <i class="fas fa-sync-alt mr-2"></i> Fetch Groups
-                            </button>
+                            <button type="button" onclick="fetchMasterGroups(this)" class="w-full bg-indigo-600 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-indigo-700 transition"><i class="fas fa-sync-alt mr-2"></i> Fetch Groups</button>
                         </div>
                     </div>
-
                     <form action="/admin/create-group" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <input type="hidden" name="masterIp" id="formMasterIp">
                         <input type="hidden" name="masterApiKey" id="formMasterApiKey">
+                        <input type="hidden" name="masterName" id="formMasterName">
                         
                         <div>
                             <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">1. Select Master Group</label>
-                            <select name="masterGroupId" id="masterGroupSelect" required class="w-full border-2 border-slate-200 bg-slate-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-semibold text-slate-700">
-                                <option value="" disabled selected>Please fetch groups first...</option>
-                            </select>
+                            <select name="masterGroupId" id="masterGroupSelect" required class="w-full border-2 border-slate-200 bg-slate-50 p-3 rounded-xl outline-none focus:border-indigo-500 font-semibold text-slate-700"><option value="" disabled selected>Please fetch groups first...</option></select>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">2. Local Name</label>
@@ -92,75 +90,58 @@ adminApp.get('/', async (req, res) => {
                             <label class="block text-xs font-bold text-slate-500 mb-1 uppercase">3. Custom DNS</label>
                             <input type="text" name="nsRecord" placeholder="e.g. ns1.yourdomain.com" required class="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 font-bold text-indigo-700">
                         </div>
-                        <div class="flex items-end">
-                            <button type="submit" class="w-full bg-slate-800 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-black transition"><i class="fas fa-plus-circle mr-2"></i> Create</button>
-                        </div>
+                        <div class="flex items-end"><button type="submit" class="w-full bg-slate-800 text-white px-6 py-3.5 rounded-xl font-bold hover:bg-black transition"><i class="fas fa-plus-circle mr-2"></i> Create</button></div>
                     </form>
                 </div>
-                
                 <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">${groupsHtml || '<p class="col-span-full text-center py-10 text-slate-500">No groups found.</p>'}</div>
             </div>
-
             <script>
                 async function fetchMasterGroups(btn) {
-                    const ip = document.getElementById('apiMasterIp').value;
+                    const ip = document.getElementById('apiMasterIp').value; 
                     const key = document.getElementById('apiMasterKey').value;
-                    if(!ip || !key) return alert("Please enter Master URL and API Key first!");
-
-                    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Fetching...';
+                    const apiNo = document.getElementById('apiMasterName').value || '1';
                     
+                    if(!ip || !key) return alert("Please enter Master URL and API Key!");
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Fetching...';
                     try {
-                        const res = await fetch('/admin/api/fetch-master-groups', {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ masterIp: ip, masterApiKey: key })
-                        });
+                        const res = await fetch('/admin/api/fetch-master-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ masterIp: ip, masterApiKey: key }) });
                         const data = await res.json();
-
                         if(data.success) {
                             let options = '<option value="" disabled selected>Select from Master...</option>';
                             data.groups.forEach(g => { options += \`<option value="\${g.id}">\${g.name} (\${g.serverCount} Nodes)</option>\`; });
-                            
-                            document.getElementById('masterGroupSelect').innerHTML = options;
+                            document.getElementById('masterGroupSelect').innerHTML = options; 
                             document.getElementById('masterGroupSelect').classList.remove('bg-slate-50');
                             
-                            document.getElementById('formMasterIp').value = ip;
+                            // 🌟 Hidden Data များကို Form ထဲသို့ ထည့်ပေးခြင်း
+                            document.getElementById('formMasterIp').value = ip; 
                             document.getElementById('formMasterApiKey').value = key;
+                            document.getElementById('formMasterName').value = apiNo;
 
-                            btn.innerHTML = '<i class="fas fa-check mr-2"></i> Connected!';
-                            btn.classList.replace('bg-indigo-600', 'bg-green-500');
+                            btn.innerHTML = '<i class="fas fa-check mr-2"></i> Connected!'; 
+                            btn.classList.replace('bg-indigo-600', 'bg-green-500'); 
                             setTimeout(() => { btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; btn.classList.replace('bg-green-500', 'bg-indigo-600'); }, 2000);
-                        } else {
-                            alert("Connection Failed: " + data.error);
-                            btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups';
-                        }
-                    } catch(e) {
-                        alert("Network Error!");
-                        btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups';
-                    }
+                        } else { alert("Failed: " + data.error); btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; }
+                    } catch(e) { alert("Network Error!"); btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; }
                 }
             </script>
         </body></html>
     `);
 });
 
-// UI မှ လှမ်းခေါ်မည့် API
 adminApp.post('/api/fetch-master-groups', async (req, res) => {
     try {
-        let { masterIp, masterApiKey } = req.body;
-        masterIp = masterIp.replace(/\\/$/, ""); // Remove trailing slash
+        let { masterIp, masterApiKey } = req.body; masterIp = masterIp.replace(/\/$/, ""); 
         const response = await axios.get(masterIp + '/api/active-groups', { headers: { 'x-api-key': masterApiKey }, timeout: 5000 });
-        if (response.data && response.data.groups) {
-            res.json({ success: true, groups: response.data.groups });
-        } else { res.json({ success: false, error: "Invalid API Response" }); }
+        if (response.data && response.data.groups) { res.json({ success: true, groups: response.data.groups }); } else { res.json({ success: false, error: "Invalid API Response" }); }
     } catch (error) { res.json({ success: false, error: error.message }); }
 });
 
 adminApp.post('/create-group', async (req, res) => {
     try {
-        const { groupName, masterGroupId, nsRecord, masterIp, masterApiKey } = req.body;
+        const { groupName, masterGroupId, nsRecord, masterIp, masterApiKey, masterName } = req.body;
         if (groupName && masterGroupId && nsRecord && masterIp && masterApiKey) {
-            let cleanIp = masterIp.replace(/\\/$/, "");
-            await Group.create({ name: groupName, masterGroupId, nsRecord, masterIp: cleanIp, masterApiKey });
+            let cleanIp = masterIp.replace(/\/$/, "");
+            await Group.create({ name: groupName, masterGroupId, nsRecord, masterIp: cleanIp, masterApiKey, masterName: masterName || "1" });
         }
         res.redirect('/admin');
     } catch (error) { res.status(500).send("Error creating group"); }
@@ -170,8 +151,10 @@ adminApp.post('/delete-group', async (req, res) => {
     try {
         const groupInfo = await Group.findOne({ name: req.body.groupName });
         const users = await User.find({ groupName: req.body.groupName });
-        for (const u of users) {
-            try { await axios.post(groupInfo.masterIp + '/api/user-action', { token: u.token, action: "delete" }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e){}
+        if (groupInfo) {
+            for (const u of users) {
+                try { await axios.post(groupInfo.masterIp + '/api/user-action', { token: u.token, action: "delete" }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e){}
+            }
         }
         await Group.deleteOne({ name: req.body.groupName });
         await User.deleteMany({ groupName: req.body.groupName });
@@ -179,9 +162,6 @@ adminApp.post('/delete-group', async (req, res) => {
     } catch (error) { res.status(500).send("Error deleting group"); }
 });
 
-// ==========================================
-// 2. INSIDE GROUP VIEW 
-// ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
     const groupInfo = await Group.findOne({ name: groupName });
@@ -192,9 +172,8 @@ adminApp.get('/group/:name', async (req, res) => {
 
     let usersHtml = '';
     users.forEach((u, index) => {
-        const ssconfLink = `ssconf://${domainName}/${u.token}.json#VPN-${encodeURIComponent(u.name.replace(/\\s+/g, ''))}`;
+        const ssconfLink = `ssconf://${domainName}/${u.token}.json#VPN-${encodeURIComponent(u.name.replace(/\s+/g, ''))}`;
         const webPanelLink = `http://${panelHost}/panel/${u.token}`; 
-        
         const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
         const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
 
@@ -222,9 +201,7 @@ adminApp.get('/group/:name', async (req, res) => {
     res.send(`
         <!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"></head>
         <body class="bg-slate-50 font-sans pb-10">
-            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8">
-                <div class="max-w-7xl mx-auto flex items-center"><a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl"><i class="fas fa-arrow-left"></i></a><span class="font-black text-xl">${groupName}</span><span class="ml-3 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-100">DNS: ${domainName}</span></div>
-            </nav>
+            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8"><div class="max-w-7xl mx-auto flex items-center"><a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl"><i class="fas fa-arrow-left"></i></a><span class="font-black text-xl">${groupName}</span><span class="ml-3 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-100">DNS: ${domainName}</span></div></nav>
             <div class="max-w-7xl mx-auto px-4">
                 <div class="bg-white rounded-2xl shadow-sm border p-6 mb-8">
                     <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -248,15 +225,12 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// ==========================================
-// 3. API ENDPOINTS (Add, Delete, Webhook)
-// ==========================================
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
         const groupInfo = await Group.findOne({ name: groupName });
-        
-        // 🌟 Database ထဲက Master IP/Key ဖြင့် တိုက်ရိုက်ခေါ်ပါမည်
+        if(!groupInfo || !groupInfo.masterIp) return res.status(400).send("Invalid Group Setup");
+
         const masterResponse = await axios.post(groupInfo.masterIp + '/api/generate-keys', {
             masterGroupId: groupInfo.masterGroupId, userName: name, totalGB, expireDate
         }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
@@ -274,11 +248,9 @@ adminApp.post('/delete-user', async (req, res) => {
     try {
         const token = req.body.token;
         const groupInfo = await Group.findOne({ name: req.body.groupName });
-
-        try {
-            await axios.post(groupInfo.masterIp + '/api/user-action', { token: token, action: "delete" }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
-        } catch(e) { console.log("Master Panel Delete Failed"); }
-
+        if (groupInfo) {
+            try { await axios.post(groupInfo.masterIp + '/api/user-action', { token: token, action: "delete" }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e) { console.log("Master Panel Delete Failed"); }
+        }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
     } catch (error) { res.status(500).send("Error deleting user"); }
@@ -288,15 +260,11 @@ adminApp.post('/api/receive-gb', async (req, res) => {
     try {
         const apiKey = req.headers['x-api-key'];
         const { token, usedGB } = req.body;
-
         const user = await User.findOne({ token: token });
         if (!user) return res.status(404).json({ error: "User token not found" });
 
         const group = await Group.findOne({ name: user.groupName });
-        // Master က ပို့တဲ့ API Key နဲ့ Group ရဲ့ Key ကိုက်ညီမှု ရှိမရှိ စစ်ဆေးမည်
-        if (!group || group.masterApiKey !== apiKey) {
-            return res.status(401).json({ error: "Unauthorized Master API Key" });
-        }
+        if (!group || group.masterApiKey !== apiKey) return res.status(401).json({ error: "Unauthorized Master API Key" });
 
         user.usedGB = Number(usedGB);
         await user.save();
