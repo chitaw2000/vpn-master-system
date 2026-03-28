@@ -862,7 +862,7 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟 EDIT USER LOGIC (SYNC TO MASTER INSTANTLY) 🌟
+// 🌟 EDIT USER LOGIC (SYNC TO MASTER WITH USED GB) 🌟
 adminApp.post('/edit-user', async (req, res) => {
     try {
         const { groupName, oldToken, newToken, newTotalGB, newExpireDate } = req.body;
@@ -880,12 +880,15 @@ adminApp.post('/edit-user', async (req, res) => {
             await user.save();
             try { await redisClient.del(oldToken); } catch(e){}
 
-            // Update Master
+            // Update Master with USED GB
             try {
                 const groupInfo = await Group.findOne({ name: groupName });
                 if (groupInfo && groupInfo.masterIp) {
                     await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
-                        username: user.name, totalGB: user.totalGB, expireDate: user.expireDate
+                        username: user.name, 
+                        totalGB: user.totalGB, 
+                        usedGB: user.usedGB, // 🌟 Fix applied here 🌟
+                        expireDate: user.expireDate
                     }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
                 }
             } catch (masterErr) { console.log("⚠️ Master Server update missed."); }
@@ -894,7 +897,7 @@ adminApp.post('/edit-user', async (req, res) => {
     } catch (error) { res.status(500).send("Error updating user details"); }
 });
 
-// 🌟 SYNC NODES (FORCES GB TO MASTER) 🌟
+// 🌟 SYNC NODES (FORCES USED GB TO MASTER) 🌟
 adminApp.post('/sync-group-nodes', async (req, res) => {
     try {
         const groupName = req.body.groupName;
@@ -922,10 +925,13 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
                         }
                         await User.updateOne({ _id: user._id }, { $set: updateQuery });
 
-                        // Force Master GB Update
+                        // Force Master GB Update with USED GB
                         try {
                             await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
-                                username: user.name, totalGB: user.totalGB, expireDate: user.expireDate
+                                username: user.name, 
+                                totalGB: user.totalGB, 
+                                usedGB: user.usedGB, // 🌟 Fix applied here 🌟
+                                expireDate: user.expireDate
                             }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 3000 });
                         } catch (e) {}
                     }
