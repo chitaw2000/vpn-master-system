@@ -7,11 +7,18 @@ const User = require('../models/User');
 const Master = require('../models/Master');
 const redisClient = require('../config/redis');
 
-// 🌟 Exponential Backoff Retry Function
+// 🌟 Exponential Backoff Retry Function (FIXED: Supports both GET and POST)
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
+    const method = (config && config.method) ? config.method.toLowerCase() : 'post';
+    
     for (let i = 0; i < retries; i++) {
         try {
-            return await axios.post(url, data, config);
+            if (method === 'get') {
+                return await axios.get(url, config);
+            } else {
+                // Send {} instead of null to prevent parser crashes on master
+                return await axios.post(url, data || {}, config); 
+            }
         } catch (err) {
             if (i === retries - 1) throw err;
             await new Promise(res => setTimeout(res, delay * Math.pow(2, i))); 
@@ -106,6 +113,7 @@ adminApp.get('/', async (req, res) => {
             </nav>
 
             <div class="max-w-7xl mx-auto px-4">
+                
                 <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-8 flex flex-col md:flex-row gap-6">
                     <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
                         <label class="block text-lg font-black text-slate-800 mb-4">
@@ -247,23 +255,39 @@ adminApp.post('/delete-master', async (req, res) => {
     res.redirect('/admin'); 
 });
 
+// 🌟 FETCH MASTER GROUPS FIX (Uses GET first, falls back to POST)
 adminApp.post('/api/fetch-master-groups', async (req, res) => {
     try { 
         let { masterIp, masterApiKey } = req.body; 
         masterIp = masterIp.replace(/\/$/, ""); 
         
-        const response = await fetchWithRetry(masterIp + '/api/active-groups', null, { 
-            headers: { 'x-api-key': masterApiKey }, 
-            timeout: 5000 
-        });
-        
-        if (response.data && response.data.groups) { 
-            res.json({ success: true, groups: response.data.groups }); 
-        } else { 
-            res.json({ success: false, error: "Invalid API Response" }); 
+        // 1. Try GET Method first (Standard for fetching data)
+        try {
+            const response = await fetchWithRetry(masterIp + '/api/active-groups', null, { 
+                method: 'get',
+                headers: { 'x-api-key': masterApiKey }, 
+                timeout: 5000 
+            });
+            
+            if (response.data && response.data.groups) { 
+                return res.json({ success: true, groups: response.data.groups }); 
+            }
+        } catch (getErr) {
+            // 2. Fallback to POST Method if GET is blocked by Master Server
+            const responsePost = await fetchWithRetry(masterIp + '/api/active-groups', {}, { 
+                method: 'post',
+                headers: { 'x-api-key': masterApiKey }, 
+                timeout: 5000 
+            });
+            
+            if (responsePost.data && responsePost.data.groups) { 
+                return res.json({ success: true, groups: responsePost.data.groups }); 
+            } else {
+                throw new Error("Invalid API Response format from Master");
+            }
         }
     } catch (error) { 
-        res.json({ success: false, error: error.message }); 
+        res.json({ success: false, error: error.message || "Failed to fetch groups from Master." }); 
     }
 });
 
@@ -303,7 +327,7 @@ adminApp.post('/delete-group', async (req, res) => {
 });
 
 // ==========================================
-// 2. INSIDE GROUP VIEW (WITH EDIT MODAL)
+// 2. INSIDE GROUP VIEW
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
@@ -524,12 +548,10 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟🌟 NEW: EDIT USER LOGIC 🌟🌟
 adminApp.post('/edit-user', async (req, res) => {
     try {
         const { groupName, oldToken, newToken, newTotalGB, newExpireDate } = req.body;
         
-        // Check if new token already exists for another user
         if (oldToken !== newToken) {
             const existingToken = await User.findOne({ token: newToken });
             if (existingToken) {
@@ -540,12 +562,10 @@ adminApp.post('/edit-user', async (req, res) => {
         const user = await User.findOne({ token: oldToken });
         
         if (user) {
-            user.token = newToken.trim(); // remove accidental spaces
+            user.token = newToken.trim(); 
             user.totalGB = Number(newTotalGB);
             user.expireDate = newExpireDate;
             await user.save();
-            
-            // Cache အဟောင်းကို ရှင်းထုတ်မည်
             try { await redisClient.del(oldToken); } catch(e){}
         }
         res.redirect('/admin/group/' + encodeURIComponent(groupName));
