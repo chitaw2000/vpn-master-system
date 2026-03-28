@@ -19,7 +19,7 @@ async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
 }
 
 // ==========================================
-// 1. PING FETCH API (Background Task)
+// 1. PING FETCH API
 // ==========================================
 userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
     try {
@@ -55,12 +55,11 @@ userApp.get('/panel/:token', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
 
-        // 🌟 One-Click App Import Links တည်ဆောက်ခြင်း
+        // 🌟 Links Construction (FIXED: Hiddify strictly uses ssconf:// now)
         const encodedName = encodeURIComponent(user.name.replace(/\s+/g, ''));
         const ssconfLink = `ssconf://${domainName}/${token}.json#QitoVPN_${encodedName}`; 
-        const hiddifyDeepLink = `hiddify://import/http://${domainName}/${token}.json`; 
+        const hiddifyDeepLink = `hiddify://import/${ssconfLink}`; 
 
-        // 🌟 Premium Server List တည်ဆောက်ခြင်း
         let nodesListHtml = '';
         let nodeNames = []; 
         
@@ -112,7 +111,7 @@ userApp.get('/panel/:token', async (req, res) => {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>QITO Tech Premium Outline</title>
+                <title>QITO Tech Premium</title>
                 <script src="https://cdn.tailwindcss.com"></script>
                 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
                 <style>
@@ -127,7 +126,7 @@ userApp.get('/panel/:token', async (req, res) => {
                             <img src="${logoUrl}" alt="Logo" class="w-12 h-12 rounded-full border-2 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)] object-cover bg-slate-800">
                             <div>
                                 <h1 class="text-xl font-black text-white tracking-tight leading-tight">QITO Tech</h1>
-                                <p class="text-xs font-black text-indigo-400 tracking-widest uppercase">Premium Outline</p>
+                                <p class="text-xs font-black text-indigo-400 tracking-widest uppercase">Premium VPN</p>
                             </div>
                         </div>
                         <div class="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 shadow-sm flex items-center gap-1.5">
@@ -262,11 +261,8 @@ userApp.get('/panel/:token', async (req, res) => {
                         }
                     }
 
-                    // 🌟 PURE TEXT COPY FUNCTION (fixes Hiddify whitespace issue) 🌟
                     function copyLink(rawLink) { 
-                        // အမှိုက် Space များကို အတင်းဖြတ်တောက်ခြင်း
                         const cleanLink = rawLink.trim();
-                        
                         const showSuccess = () => {
                             var btn = document.getElementById('copyBtn'); 
                             btn.innerHTML = '<i class="fas fa-check-circle text-lg"></i> LINK COPIED!'; 
@@ -282,19 +278,12 @@ userApp.get('/panel/:token', async (req, res) => {
                             }, 3000); 
                         };
 
-                        // နောက်ဆုံးပေါ် (Modern) နည်းပညာဖြင့် အသန့်ရှင်းဆုံး Copy ကူးခြင်း
                         if (navigator.clipboard && window.isSecureContext) {
                             navigator.clipboard.writeText(cleanLink).then(showSuccess);
                         } else {
-                            // Fallback for older browsers (using textarea to avoid rich-text formatting)
                             let t = document.createElement("textarea"); 
-                            t.value = cleanLink; 
-                            t.style.position = "fixed";
-                            t.style.opacity = "0";
-                            document.body.appendChild(t); 
-                            t.select(); 
-                            document.execCommand("copy"); 
-                            document.body.removeChild(t); 
+                            t.value = cleanLink; t.style.position = "fixed"; t.style.opacity = "0";
+                            document.body.appendChild(t); t.select(); document.execCommand("copy"); document.body.removeChild(t); 
                             showSuccess();
                         }
                     }
@@ -338,9 +327,7 @@ userApp.post('/panel/change-server', async (req, res) => {
                     }
                     await User.updateOne({ _id: user._id }, { $set: updateQuery });
                 }
-            } catch (err) { 
-                console.log("Key Sync Error"); 
-            }
+            } catch (err) {}
         }
 
         user.currentServer = newServer; 
@@ -354,9 +341,7 @@ userApp.post('/panel/change-server', async (req, res) => {
                 { token: token, activeServer: newServer }, 
                 { headers: { 'x-api-key': groupInfo.masterApiKey } }
             ); 
-        } catch (err) {
-            console.log("Webhook Switch Error");
-        }
+        } catch (err) {}
         
         res.redirect('/panel/' + token);
     } catch (error) { 
@@ -365,7 +350,7 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // ==========================================
-// 4. SSCONF SUBSCRIPTION API
+// 4. OUTLINE SUBSCRIPTION API (PURE JSON)
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
     try {
@@ -373,11 +358,7 @@ userApp.get('/:token.json', async (req, res) => {
         
         const cachedKey = await redisClient.get(token);
         if (cachedKey) { 
-            try { 
-                return res.json(JSON.parse(cachedKey)); 
-            } catch (e) { 
-                await redisClient.del(token); 
-            } 
+            try { return res.json(JSON.parse(cachedKey)); } catch (e) { await redisClient.del(token); } 
         }
         
         const user = await User.findOne({ token: token });
@@ -391,6 +372,7 @@ userApp.get('/:token.json', async (req, res) => {
                 return res.json({ server: rawConfig }); 
             }
 
+            // 🌟 PURE JSON ကိုသာ ပြန်ပေးမည် (Outline နှင့် Hiddify ၏ ssconf:// မှ Native ဖတ်နိုင်ရန်)
             if (typeof rawConfig === 'object' && rawConfig.server) { 
                 rawConfig = { 
                     server: rawConfig.server, 
@@ -410,7 +392,7 @@ userApp.get('/:token.json', async (req, res) => {
 });
 
 // ==========================================
-// 5. SUPER FORGIVING AUTO-RECEIVE WEBHOOK
+// 5. AUTO-RECEIVE WEBHOOK
 // ==========================================
 userApp.post('/api/internal/sync-new-server', async (req, res) => {
     try {
