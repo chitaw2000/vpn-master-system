@@ -39,7 +39,7 @@ adminApp.get('/', async (req, res) => {
                 </h3>
                 <form action="/admin/delete-group" method="POST" onsubmit="return confirm('Group ကို ဖျက်မှာ သေချာပြီလား?');" class="m-0">
                     <input type="hidden" name="groupName" value="${g.name}">
-                    <button type="submit" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition">
+                    <button type="submit" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition" title="Delete Group">
                         <i class="fas fa-trash-alt"></i>
                     </button>
                 </form>
@@ -277,7 +277,9 @@ adminApp.post('/create-group', async (req, res) => {
             }); 
         }
         res.redirect('/admin');
-    } catch (error) { res.status(500).send("Error creating group"); }
+    } catch (error) { 
+        res.status(500).send("Error creating group"); 
+    }
 });
 
 adminApp.post('/delete-group', async (req, res) => {
@@ -299,7 +301,9 @@ adminApp.post('/delete-group', async (req, res) => {
         await Group.deleteOne({ name: req.body.groupName }); 
         await User.deleteMany({ groupName: req.body.groupName }); 
         res.redirect('/admin');
-    } catch (error) { res.status(500).send("Error deleting group"); }
+    } catch (error) { 
+        res.status(500).send("Error deleting group"); 
+    }
 });
 
 // ==========================================
@@ -405,22 +409,32 @@ adminApp.get('/group/:name', async (req, res) => {
             <div class="max-w-7xl mx-auto px-4">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border p-6">
-                        <label class="block text-sm font-black text-slate-800 mb-4"><i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key</label>
+                        <label class="block text-sm font-black text-slate-800 mb-4">
+                            <i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key
+                        </label>
                         <form action="/admin/add-user" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-3">
                             <input type="hidden" name="groupName" value="${groupName}">
                             <input type="text" name="name" placeholder="User Name" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
                             <input type="number" name="totalGB" placeholder="Data (GB)" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm">
                             <input type="date" name="expireDate" required class="border-2 border-slate-200 p-2.5 rounded-xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-600">
-                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">Create</button>
+                            <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">
+                                Create
+                            </button>
                         </form>
                     </div>
 
                     <div class="bg-yellow-50 rounded-2xl shadow-sm border border-yellow-200 p-6">
-                        <label class="block text-sm font-black text-yellow-800 mb-2"><i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection</label>
+                        <label class="block text-sm font-black text-yellow-800 mb-2">
+                            <i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection
+                        </label>
                         <form action="/admin/update-group-master" method="POST" class="flex flex-col gap-2">
                             <input type="hidden" name="groupName" value="${groupName}">
-                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">${relinkOptions}</select>
-                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">Re-Link Master</button>
+                            <select name="masterData" required class="w-full border border-yellow-300 bg-white p-2 rounded-lg outline-none font-bold text-xs text-slate-700">
+                                ${relinkOptions}
+                            </select>
+                            <button type="submit" class="w-full bg-yellow-500 text-white rounded-lg py-2 font-bold hover:bg-yellow-600 transition text-sm">
+                                Re-Link Master
+                            </button>
                         </form>
                     </div>
                 </div>
@@ -429,19 +443,38 @@ adminApp.get('/group/:name', async (req, res) => {
                     <table class="w-full text-left">
                         <thead>
                             <tr class="bg-slate-100 text-xs uppercase text-slate-500">
-                                <th class="p-4">ID</th><th class="p-4">User</th><th class="p-4">Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Actions</th>
+                                <th class="p-4">ID</th>
+                                <th class="p-4">User</th>
+                                <th class="p-4">Node</th>
+                                <th class="p-4">Expire</th>
+                                <th class="p-4">Usage</th>
+                                <th class="p-4 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody>${usersHtml}</tbody>
+                        <tbody>
+                            ${usersHtml}
+                        </tbody>
                     </table>
                 </div>
             </div>
 
             <script>
                 function copyLink(link, btnId, origHtml) {
-                    var tempInput = document.createElement("input"); tempInput.value = link; document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
-                    var btn = document.getElementById(btnId); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.classList.add('bg-green-500', 'text-white');
-                    setTimeout(() => { btn.innerHTML = origHtml; btn.classList.remove('bg-green-500', 'text-white'); }, 2000);
+                    var tempInput = document.createElement("input"); 
+                    tempInput.value = link; 
+                    document.body.appendChild(tempInput); 
+                    tempInput.select(); 
+                    document.execCommand("copy"); 
+                    document.body.removeChild(tempInput);
+                    
+                    var btn = document.getElementById(btnId); 
+                    btn.innerHTML = '<i class="fas fa-check"></i>'; 
+                    btn.classList.add('bg-green-500', 'text-white');
+                    
+                    setTimeout(() => { 
+                        btn.innerHTML = origHtml; 
+                        btn.classList.remove('bg-green-500', 'text-white'); 
+                    }, 2000);
                 }
             </script>
         </body>
@@ -449,7 +482,7 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟🌟 NEW: FORCE DATABASE MERGE FOR SYNC ALL NODES 🌟🌟
+// 🌟🌟 BATCH SYNC ALL NODES WITH MONGODB INJECTION 🌟🌟
 adminApp.post('/sync-group-nodes', async (req, res) => {
     try {
         const groupName = req.body.groupName;
@@ -471,20 +504,17 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
                     }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 8000 });
 
                     if (masterResponse.data && masterResponse.data.keys) {
-                        
-                        // 🌟 1. Merge Old and New Keys
-                        const mergedKeys = { ...(user.accessKeys || {}), ...masterResponse.data.keys };
-                        let currentNode = user.currentServer;
-
-                        if (!mergedKeys[currentNode]) {
-                            currentNode = Object.keys(mergedKeys)[0] || "None";
+                        const updateQuery = {};
+                        for (const [nodeName, nodeConfig] of Object.entries(masterResponse.data.keys)) {
+                            // Direct Data Injection to bypass MongoDB Nested Object issues
+                            updateQuery[`accessKeys.${nodeName}`] = nodeConfig;
                         }
 
-                        // 🌟 2. Force Database Update ($set) to bypass Mongo Mixed Type ignore issue
-                        await User.updateOne(
-                            { _id: user._id },
-                            { $set: { accessKeys: mergedKeys, currentServer: currentNode } }
-                        );
+                        if (!user.currentServer || user.currentServer === "None") {
+                            updateQuery["currentServer"] = Object.keys(masterResponse.data.keys)[0] || "None";
+                        }
+
+                        await User.updateOne({ _id: user._id }, { $set: updateQuery });
                     }
                 } catch (err) {
                     console.log(`❌ Failed to sync nodes for user: ${user.name}`);
@@ -528,7 +558,15 @@ adminApp.post('/add-user', async (req, res) => {
             const token = crypto.randomBytes(16).toString('hex'); 
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
             await User.create({ 
-                name, token, groupName, totalGB: Number(totalGB), usedGB: 0, currentServer: defaultServer, expireDate, accessKeys: masterResponse.data.keys, userNo: nextNo 
+                name, 
+                token, 
+                groupName, 
+                totalGB: Number(totalGB), 
+                usedGB: 0, 
+                currentServer: defaultServer, 
+                expireDate, 
+                accessKeys: masterResponse.data.keys, 
+                userNo: nextNo 
             });
             res.redirect('/admin/group/' + encodeURIComponent(groupName));
         } else { 
@@ -552,7 +590,9 @@ adminApp.post('/delete-user', async (req, res) => {
                     { username: user.name, token: token },
                     { headers: { 'x-api-key': groupInfo.masterApiKey } }
                 ); 
-            } catch(e) {}
+            } catch(e) { 
+                console.error(`❌ Master Delete Failed for ${user.name}`); 
+            }
         }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
@@ -564,10 +604,13 @@ adminApp.post('/delete-user', async (req, res) => {
 adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
     try {
         const { name, usedGB, totalGB, expireDate, isBlocked } = req.body;
+        
         if (!name) return res.status(400).json({ error: "Missing username" });
 
         const user = await User.findOne({ name: name });
-        if (!user) return res.status(404).json({ error: "User not found locally" });
+        if (!user) {
+            return res.status(404).json({ error: "User not found locally" });
+        }
 
         if (usedGB !== undefined) user.usedGB = Number(usedGB);
         if (totalGB !== undefined) user.totalGB = Number(totalGB);
@@ -580,32 +623,40 @@ adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
     }
 });
 
-// 🌟🌟 NEW: FORCE UPDATE FOR AUTO SYNC WEBHOOK 🌟🌟
+// Root Sync New Server Webhook Webhook
 adminApp.post('/api/internal/sync-new-server', async (req, res) => {
     try {
         const apiKey = req.headers['x-api-key'];
         const { masterGroupId, newServerName, userKeys } = req.body;
 
-        if (!masterGroupId || !newServerName || !userKeys) return res.status(400).json({ error: "Invalid payload data" });
+        if (!masterGroupId || !newServerName || !userKeys) {
+            return res.status(400).json({ error: "Invalid payload data" });
+        }
 
         const validGroup = await Group.findOne({ masterGroupId: masterGroupId, masterApiKey: apiKey });
-        if (!validGroup) return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
+        if (!validGroup) {
+            return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
+        }
 
+        let successCount = 0;
         for (const [identifier, newConfig] of Object.entries(userKeys)) {
-            const user = await User.findOne({ $or: [{ token: identifier }, { name: identifier }] });
-            if (user) {
-                
-                // 🌟 Force Database Update ($set) 🌟
-                const updatedKeys = { ...(user.accessKeys || {}) };
-                updatedKeys[newServerName] = newConfig;
+            const escapedIdentifier = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const user = await User.findOne({ 
+                $or: [
+                    { token: identifier }, 
+                    { name: new RegExp('^' + escapedIdentifier + '$', 'i') } 
+                ] 
+            });
 
+            if (user) {
                 await User.updateOne(
                     { _id: user._id },
-                    { $set: { accessKeys: updatedKeys } }
+                    { $set: { [`accessKeys.${newServerName}`]: newConfig } }
                 );
+                successCount++;
             }
         }
-        return res.json({ success: true, message: "Server synced successfully" });
+        return res.json({ success: true, message: `Server synced successfully for ${successCount} users` });
     } catch (error) { 
         res.status(500).json({ error: "Server Error" }); 
     }
