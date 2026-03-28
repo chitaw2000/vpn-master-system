@@ -6,6 +6,21 @@ const Group = require('../models/Group');
 const User = require('../models/User');
 const Master = require('../models/Master');
 
+// 🌟 Exponential Backoff Retry Function (ဟိုဘက်ဆာဗာ မမိရင် ၃ ကြိမ် ပြန်ခေါ်ပေးမည့်စနစ်)
+async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await axios.post(url, data, config);
+        } catch (err) {
+            if (i === retries - 1) throw err;
+            await new Promise(res => setTimeout(res, delay * Math.pow(2, i))); // 1s, 2s, 4s waiting
+        }
+    }
+}
+
+// ==========================================
+// 1. HOME DASHBOARD
+// ==========================================
 adminApp.get('/', async (req, res) => {
     const groups = await Group.find({});
     const masters = await Master.find({}); 
@@ -114,7 +129,7 @@ adminApp.post('/add-master', async (req, res) => {
 });
 adminApp.post('/delete-master', async (req, res) => { await Master.findByIdAndDelete(req.body.id); res.redirect('/admin'); });
 adminApp.post('/api/fetch-master-groups', async (req, res) => {
-    try { let { masterIp, masterApiKey } = req.body; masterIp = masterIp.replace(/\/$/, ""); const response = await axios.get(masterIp + '/api/active-groups', { headers: { 'x-api-key': masterApiKey }, timeout: 5000 });
+    try { let { masterIp, masterApiKey } = req.body; masterIp = masterIp.replace(/\/$/, ""); const response = await fetchWithRetry(masterIp + '/api/active-groups', null, { headers: { 'x-api-key': masterApiKey }, timeout: 5000 });
         if (response.data && response.data.groups) { res.json({ success: true, groups: response.data.groups }); } else { res.json({ success: false, error: "Invalid API" }); }
     } catch (error) { res.json({ success: false, error: error.message }); }
 });
@@ -129,11 +144,21 @@ adminApp.post('/create-group', async (req, res) => {
 adminApp.post('/delete-group', async (req, res) => {
     try {
         const groupInfo = await Group.findOne({ name: req.body.groupName }); const users = await User.find({ groupName: req.body.groupName });
-        if (groupInfo) { for (const u of users) { try { await axios.post(groupInfo.masterIp + '/api/user-action', { token: u.token, action: "delete" }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e){} } }
+        if (groupInfo) { 
+            for (const u of users) { 
+                try { 
+                    // 🌟 Master Developer ရဲ့ သတ်မှတ်ချက်အတိုင်း Delete-User API အသစ်ကို ၃ ကြိမ်ခေါ်ပါမည်
+                    await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: u.name, token: u.token }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); 
+                } catch(e){} 
+            } 
+        }
         await Group.deleteOne({ name: req.body.groupName }); await User.deleteMany({ groupName: req.body.groupName }); res.redirect('/admin');
     } catch (error) { res.status(500).send("Error"); }
 });
 
+// ==========================================
+// 2. INSIDE GROUP VIEW
+// ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
     const groupInfo = await Group.findOne({ name: groupName });
@@ -229,7 +254,7 @@ adminApp.post('/add-user', async (req, res) => {
         const lastUser = await User.findOne({ groupName: groupName }).sort({ userNo: -1 });
         const nextNo = (lastUser && lastUser.userNo) ? lastUser.userNo + 1 : 1;
 
-        const masterResponse = await axios.post(groupInfo.masterIp + '/api/generate-keys', {
+        const masterResponse = await fetchWithRetry(groupInfo.masterIp + '/api/generate-keys', {
             masterGroupId: groupInfo.masterGroupId, userName: name, totalGB, expireDate
         }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
 
@@ -242,32 +267,53 @@ adminApp.post('/add-user', async (req, res) => {
     } catch (error) { res.status(500).send("Error connecting to Master"); }
 });
 
+// 🌟 Master Developer ရဲ့ သတ်မှတ်ချက်အတိုင်း Delete API အသစ်
 adminApp.post('/delete-user', async (req, res) => {
     try {
         const token = req.body.token;
         const groupInfo = await Group.findOne({ name: req.body.groupName });
-        if (groupInfo) {
-            try { await axios.post(groupInfo.masterIp + '/api/user-action', { token: token, action: "delete" }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e) {}
+        const user = await User.findOne({ token: token });
+        
+        if (groupInfo && user) {
+            try { 
+                // ၃ ကြိမ်တိတိ Retry လုပ်ပေးပါမည်
+                await fetchWithRetry(
+                    groupInfo.masterIp + '/api/internal/delete-user', 
+                    { username: user.name, token: token }, // username ကို အဓိကပို့သည်
+                    { headers: { 'x-api-key': groupInfo.masterApiKey } }
+                ); 
+                console.log(`✅ Deleted user on Master: ${user.name}`);
+            } catch(e) { console.error(`❌ Master Delete Failed for ${user.name}`); }
         }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
     } catch (error) { res.status(500).send("Error deleting user"); }
 });
 
-adminApp.post('/api/receive-gb', async (req, res) => {
+// 🌟 Master Developer ရဲ့ သတ်မှတ်ချက်အတိုင်း Webhook အသစ် (Token အစား Name ဖြင့် ရှာမည်)
+adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
     try {
-        const apiKey = req.headers['x-api-key'];
-        const { token, usedGB } = req.body;
-        const user = await User.findOne({ token: token });
-        if (!user) return res.status(404).json({ error: "User token not found" });
+        const { name, usedGB, totalGB, expireDate, isBlocked } = req.body;
+        
+        if (!name) return res.status(400).json({ error: "Missing username" });
 
-        const group = await Group.findOne({ name: user.groupName });
-        if (!group || group.masterApiKey !== apiKey) return res.status(401).json({ error: "Unauthorized Master API Key" });
+        // Username ဖြင့် DB တွင် ရှာဖွေပါမည်
+        const user = await User.findOne({ name: name });
+        if (!user) {
+            return res.status(404).json({ error: "User not found locally" });
+        }
 
-        user.usedGB = Number(usedGB);
+        // ရှိသမျှ Data များကို Upsert (Update) လုပ်ပါမည်
+        if (usedGB !== undefined) user.usedGB = Number(usedGB);
+        if (totalGB !== undefined) user.totalGB = Number(totalGB);
+        if (expireDate !== undefined) user.expireDate = expireDate;
+        
         await user.save();
-        return res.json({ success: true, message: "GB Updated" });
-    } catch (error) { res.status(500).json({ error: "Server Error" }); }
+        return res.json({ success: true, message: "Usage synced successfully" });
+    } catch (error) { 
+        console.error("Sync Webhook Error:", error.message);
+        res.status(500).json({ error: "Server Error" }); 
+    }
 });
 
 module.exports = adminApp;
