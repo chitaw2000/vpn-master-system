@@ -282,9 +282,7 @@ adminApp.post('/create-group', async (req, res) => {
             }); 
         }
         res.redirect('/admin');
-    } catch (error) { 
-        res.status(500).send("Error creating group"); 
-    }
+    } catch (error) { res.status(500).send("Error creating group"); }
 });
 
 adminApp.post('/delete-group', async (req, res) => {
@@ -300,17 +298,13 @@ adminApp.post('/delete-group', async (req, res) => {
                         { username: u.name, token: u.token }, 
                         { headers: { 'x-api-key': groupInfo.masterApiKey } }
                     ); 
-                } catch(e) {
-                    console.log("Failed to delete user on master:", u.name);
-                } 
+                } catch(e) {} 
             } 
         }
         await Group.deleteOne({ name: req.body.groupName }); 
         await User.deleteMany({ groupName: req.body.groupName }); 
         res.redirect('/admin');
-    } catch (error) { 
-        res.status(500).send("Error deleting group"); 
-    }
+    } catch (error) { res.status(500).send("Error deleting group"); }
 });
 
 // ==========================================
@@ -489,7 +483,7 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟🌟 NEW: MANUAL SYNC ALL NODES API 🌟🌟
+// 🌟🌟 NEW & IMPROVED: FAST CONCURRENT SYNC ALL NODES API 🌟🌟
 adminApp.post('/sync-group-nodes', async (req, res) => {
     try {
         const groupName = req.body.groupName;
@@ -498,31 +492,30 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
 
         const users = await User.find({ groupName: groupName });
         
-        for (const user of users) {
+        // 🌟 Promise.all ကို သုံးပြီး User အားလုံးကို တစ်ပြိုင်နက်တည်း (Fast) ဆွဲယူမည် 🌟
+        await Promise.all(users.map(async (user) => {
             try {
-                // Fetch the latest keys for this user from Master Panel
-                const masterResponse = await fetchWithRetry(groupInfo.masterIp + '/api/generate-keys', {
-                    masterGroupId: groupInfo.masterGroupId, 
-                    userName: user.name, 
-                    totalGB: user.totalGB, 
-                    expireDate: user.expireDate
-                }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
+                // Master Developer ပေးထားသော "GET /conf/{token}.json" လမ်းကြောင်းအမှန်ကို အသုံးပြုထားပါသည်
+                const url = `${groupInfo.masterIp}/conf/${user.token}.json`;
+                // ၃ စက္ကန့်အတွင်း မရလျှင် ချက်ချင်း ဖြတ်ချမည့် (Strict Timeout) စနစ်
+                const response = await axios.get(url, { timeout: 3000 });
 
-                if (masterResponse.data && masterResponse.data.keys) {
-                    user.accessKeys = masterResponse.data.keys;
+                if (response.data && response.data.server) {
+                    if (!user.accessKeys) user.accessKeys = {};
                     
-                    // If their current server was deleted, switch them to the first available node
-                    if (!user.accessKeys[user.currentServer]) {
-                        user.currentServer = Object.keys(user.accessKeys)[0] || "None";
-                    }
+                    const nodeName = (user.currentServer && user.currentServer !== "None") ? user.currentServer : "Auto-Synced-Node";
+                    user.accessKeys[nodeName] = response.data;
+                    user.currentServer = nodeName;
                     
                     user.markModified('accessKeys');
                     await user.save();
                 }
             } catch (err) {
-                console.log(`❌ Failed to sync nodes for user: ${user.name}`);
+                // တစ်ယောက်ယောက် fail သွားရင်တောင် ကျန်တဲ့သူတွေ ဆက်အလုပ်လုပ်အောင် Silent ထားပါမည်
+                console.log(`❌ Failed to manual sync node for user: ${user.name}`);
             }
-        }
+        }));
+
         res.redirect('/admin/group/' + encodeURIComponent(groupName));
     } catch (error) {
         res.status(500).send("Error syncing nodes");
@@ -560,15 +553,7 @@ adminApp.post('/add-user', async (req, res) => {
             const token = crypto.randomBytes(16).toString('hex'); 
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
             await User.create({ 
-                name, 
-                token, 
-                groupName, 
-                totalGB: Number(totalGB), 
-                usedGB: 0, 
-                currentServer: defaultServer, 
-                expireDate, 
-                accessKeys: masterResponse.data.keys, 
-                userNo: nextNo 
+                name, token, groupName, totalGB: Number(totalGB), usedGB: 0, currentServer: defaultServer, expireDate, accessKeys: masterResponse.data.keys, userNo: nextNo 
             });
             res.redirect('/admin/group/' + encodeURIComponent(groupName));
         } else { 
@@ -592,7 +577,6 @@ adminApp.post('/delete-user', async (req, res) => {
                     { username: user.name, token: token },
                     { headers: { 'x-api-key': groupInfo.masterApiKey } }
                 ); 
-                console.log(`✅ Deleted user on Master: ${user.name}`);
             } catch(e) { 
                 console.error(`❌ Master Delete Failed for ${user.name}`); 
             }
@@ -607,13 +591,10 @@ adminApp.post('/delete-user', async (req, res) => {
 adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
     try {
         const { name, usedGB, totalGB, expireDate, isBlocked } = req.body;
-        
         if (!name) return res.status(400).json({ error: "Missing username" });
 
         const user = await User.findOne({ name: name });
-        if (!user) {
-            return res.status(404).json({ error: "User not found locally" });
-        }
+        if (!user) return res.status(404).json({ error: "User not found locally" });
 
         if (usedGB !== undefined) user.usedGB = Number(usedGB);
         if (totalGB !== undefined) user.totalGB = Number(totalGB);
@@ -622,32 +603,24 @@ adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
         await user.save();
         return res.json({ success: true, message: "Usage synced successfully" });
     } catch (error) { 
-        console.error("Sync Webhook Error:", error.message);
         res.status(500).json({ error: "Server Error" }); 
     }
 });
 
-// Master Auto-Push Webhook (Fallback) - Token (သို့) Name ဖြင့်ရှာဖွေရန် ပြင်ဆင်ထားသည်
 adminApp.post('/api/internal/sync-new-server', async (req, res) => {
     try {
         const apiKey = req.headers['x-api-key'];
         const { masterGroupId, newServerName, userKeys } = req.body;
 
-        if (!masterGroupId || !newServerName || !userKeys) {
-            return res.status(400).json({ error: "Invalid payload data" });
-        }
+        if (!masterGroupId || !newServerName || !userKeys) return res.status(400).json({ error: "Invalid payload data" });
 
         const validGroup = await Group.findOne({ masterGroupId: masterGroupId, masterApiKey: apiKey });
-        if (!validGroup) {
-            return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
-        }
+        if (!validGroup) return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
 
         for (const [identifier, newConfig] of Object.entries(userKeys)) {
-            // Master က Token အစစ်မသိလျှင် Name ဖြင့်ပါ လိုက်ရှာပေးမည်
             const user = await User.findOne({ $or: [{ token: identifier }, { name: identifier }] });
             if (user) {
                 if (!user.accessKeys) user.accessKeys = {};
-                
                 user.accessKeys[newServerName] = newConfig;
                 user.markModified('accessKeys'); 
                 await user.save();
