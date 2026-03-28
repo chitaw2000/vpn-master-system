@@ -136,12 +136,14 @@ userApp.post('/panel/change-server', async (req, res) => {
                 
                 if (masterResponse.data && masterResponse.data.keys) { 
                     
-                    // 🌟 Merge & Force Database Update 🌟
-                    const mergedKeys = { ...(user.accessKeys || {}), ...masterResponse.data.keys };
+                    const updateQuery = {};
+                    for (const [nodeName, nodeConfig] of Object.entries(masterResponse.data.keys)) {
+                        updateQuery[`accessKeys.${nodeName}`] = nodeConfig;
+                    }
                     
                     await User.updateOne(
                         { _id: user._id },
-                        { $set: { accessKeys: mergedKeys } }
+                        { $set: updateQuery }
                     );
                 }
             } catch (err) { 
@@ -226,21 +228,26 @@ userApp.post('/api/internal/sync-new-server', async (req, res) => {
             return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
         }
 
+        let successCount = 0;
         for (const [identifier, newConfig] of Object.entries(userKeys)) {
-            const user = await User.findOne({ $or: [{ token: identifier }, { name: identifier }] });
+            const escapedIdentifier = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const user = await User.findOne({ 
+                $or: [
+                    { token: identifier }, 
+                    { name: new RegExp('^' + escapedIdentifier + '$', 'i') } 
+                ] 
+            });
+
             if (user) {
-                
-                // 🌟 Force Update to bypass Database ignore issue 🌟
-                const updatedKeys = { ...(user.accessKeys || {}) };
-                updatedKeys[newServerName] = newConfig;
-                
+                // MongoDB ကို အတင်းရိုက်သွင်းမည့် စနစ်
                 await User.updateOne(
                     { _id: user._id },
-                    { $set: { accessKeys: updatedKeys } }
+                    { $set: { [`accessKeys.${newServerName}`]: newConfig } }
                 );
+                successCount++;
             }
         }
-        return res.json({ success: true, message: "Server synced successfully" });
+        return res.json({ success: true, message: `Server synced successfully for ${successCount} users` });
     } catch (error) { 
         console.error("Sync New Server Error:", error.message);
         res.status(500).json({ error: "Server Error" }); 
