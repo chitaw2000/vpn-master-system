@@ -15,6 +15,15 @@ if (!fs.existsSync(backupDir)) {
     fs.mkdirSync(backupDir, { recursive: true });
 }
 
+// 🌟 Myanmar Standard Time (MMT) Formatter 🌟
+function getMMTString() {
+    const d = new Date();
+    const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+    const mmt = new Date(utc + (3600000 * 6.5)); // UTC+6:30
+    const p = n => n.toString().padStart(2, '0');
+    return `${mmt.getFullYear()}-${p(mmt.getMonth()+1)}-${p(mmt.getDate())}_${p(mmt.getHours())}-${p(mmt.getMinutes())}-${p(mmt.getSeconds())}`;
+}
+
 // 🌟 Exponential Backoff Retry Function
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
     const method = (config && config.method) ? config.method.toLowerCase() : 'post';
@@ -29,46 +38,97 @@ async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
     }
 }
 
+// 🌟 Common UI Components 🌟
+const getNavbar = (title = "QITO <span class='text-indigo-400 font-light ml-1'>ADMIN</span>") => `
+    <nav class="bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-900 text-white shadow-xl p-4 mb-8 sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+            <a href="/admin" class="font-black text-xl md:text-2xl tracking-tight flex items-center shrink-0 transition hover:scale-105">
+                <div class="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center mr-3 border border-indigo-400/30">
+                    <i class="fas fa-shield-alt text-indigo-400"></i>
+                </div>
+                <span class="hidden sm:inline">${title}</span>
+            </a>
+            
+            <div class="flex-1 flex justify-center">
+                <form action="/admin/search" method="POST" class="w-full max-w-lg relative group">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <i class="fas fa-search text-slate-400 group-focus-within:text-indigo-400 transition"></i>
+                    </div>
+                    <input type="text" name="query" placeholder="Search by ssconf link or Token..." required class="w-full bg-slate-800/50 border border-slate-700 text-white text-sm rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block pl-10 p-3 transition-all outline-none placeholder-slate-400 shadow-inner">
+                    <button type="submit" class="absolute inset-y-0 right-0 pr-4 flex items-center text-xs font-bold text-indigo-400 hover:text-indigo-300 transition">FIND</button>
+                </form>
+            </div>
+
+            <a href="/admin/settings" class="shrink-0 w-12 h-12 flex items-center justify-center bg-slate-800/50 hover:bg-indigo-500/30 rounded-2xl border border-slate-700 hover:border-indigo-400/50 transition-all duration-300 group" title="Settings & Backups">
+                <i class="fas fa-cog text-xl text-slate-300 group-hover:text-indigo-300 group-hover:rotate-90 transition-transform duration-500"></i>
+            </a>
+        </div>
+    </nav>
+`;
+
+const getLoadingModal = () => `
+    <div id="loadingModal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-900/80 backdrop-blur-sm">
+        <div class="bg-white p-8 rounded-3xl flex flex-col items-center shadow-2xl transform scale-105 transition-transform">
+            <i class="fas fa-circle-notch fa-spin text-indigo-600 text-5xl mb-4"></i>
+            <p class="text-slate-800 font-black tracking-wide text-lg">Processing Backup...</p>
+            <p class="text-slate-500 text-xs font-bold mt-1">Please wait, do not close.</p>
+        </div>
+    </div>
+`;
+
+const getUploadScript = () => `
+    <script>
+        function triggerUpload(type, expectedGroup = null) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = e => {
+                const file = e.target.files[0];
+                if(!file) return;
+                
+                document.getElementById('loadingModal').classList.remove('hidden');
+                document.getElementById('loadingModal').classList.add('flex');
+                
+                const reader = new FileReader();
+                reader.onload = async (ev) => {
+                    try {
+                        const jsonData = JSON.parse(ev.target.result);
+                        
+                        const res = await fetch('/admin/api/restore-upload', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ data: jsonData, expectedGroup })
+                        });
+                        const result = await res.json();
+                        
+                        if(result.success) {
+                            alert('✅ Backup File ပြန်လည်ထည့်သွင်းခြင်း အောင်မြင်ပါသည်!');
+                            window.location.reload();
+                        } else {
+                            alert('❌ Error: ' + result.error);
+                            document.getElementById('loadingModal').classList.add('hidden');
+                            document.getElementById('loadingModal').classList.remove('flex');
+                        }
+                    } catch(err) {
+                        alert('❌ Invalid JSON File! ဖိုင်အမျိုးအစား မှားယွင်းနေပါသည်။');
+                        document.getElementById('loadingModal').classList.add('hidden');
+                        document.getElementById('loadingModal').classList.remove('flex');
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+    </script>
+`;
+
 // ==========================================
-// 1. HOME DASHBOARD (WITH BACKUP & SEARCH & ANIMATIONS)
+// 1. HOME DASHBOARD
 // ==========================================
 adminApp.get('/', async (req, res) => {
     const groups = await Group.find({});
     const masters = await Master.find({}); 
     
-    // 🌟 Read Available Backups
-    let backups = [];
-    if (fs.existsSync(backupDir)) {
-        backups = fs.readdirSync(backupDir).filter(f => f.endsWith('.json')).sort().reverse();
-    }
-    
-    let backupHtml = '';
-    if (backups.length === 0) {
-        backupHtml = '<p class="text-xs text-slate-400">No backups available.</p>';
-    } else {
-        backups.forEach(b => {
-            const badgeColor = b.includes('Full') ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600';
-            const badgeText = b.includes('Full') ? 'FULL' : 'GROUP';
-            backupHtml += `
-            <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl mb-2 border border-slate-100 hover:shadow-md hover:border-indigo-200 transition-all duration-300">
-                <div class="flex items-center gap-2 overflow-hidden">
-                    <span class="${badgeColor} px-2 py-0.5 rounded text-[10px] font-black tracking-wider">${badgeText}</span>
-                    <span class="font-mono text-[11px] text-slate-600 truncate">${b}</span>
-                </div>
-                <div class="flex gap-2 ml-2">
-                    <form action="/admin/restore-backup" method="POST" onsubmit="return confirm('ဒီ Backup ကို တကယ် ပြန်ထည့်မှာ သေချာလား? ယာယီ Data များ အစားထိုးသွားပါမည်!');" class="m-0">
-                        <input type="hidden" name="filename" value="${b}">
-                        <button type="submit" class="bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-sm" title="Restore"><i class="fas fa-undo"></i></button>
-                    </form>
-                    <form action="/admin/delete-backup" method="POST" onsubmit="return confirm('Backup ဖိုင်အား ဖျက်မှာ သေချာလား?');" class="m-0">
-                        <input type="hidden" name="filename" value="${b}">
-                        <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-sm" title="Delete"><i class="fas fa-trash"></i></button>
-                    </form>
-                </div>
-            </div>`;
-        });
-    }
-
     let groupsHtml = '';
     for (const g of groups) {
         const userCount = await User.countDocuments({ groupName: g.name });
@@ -81,7 +141,7 @@ adminApp.get('/', async (req, res) => {
                         ${g.masterName || 'API-1'}
                     </span>
                 </h3>
-                <button onclick="openDoubleConfirmModal('${g.name}')" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2.5 rounded-xl transition" title="Delete Group">
+                <button type="button" onclick="openDoubleConfirmModal('${g.name}')" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2.5 rounded-xl transition" title="Delete Group">
                     <i class="fas fa-trash-alt"></i>
                 </button>
             </div>
@@ -136,11 +196,7 @@ adminApp.get('/', async (req, res) => {
             <script src="https://cdn.tailwindcss.com"></script>
             <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
             <style>
-                /* Premium Animations */
-                @keyframes fadeInUp {
-                    from { opacity: 0; transform: translateY(20px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
+                @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
                 .animate-fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
                 .delay-100 { animation-delay: 0.1s; }
                 .delay-200 { animation-delay: 0.2s; }
@@ -148,64 +204,29 @@ adminApp.get('/', async (req, res) => {
         </head>
         <body class="bg-[#f8fafc] font-sans pb-10 selection:bg-indigo-500 selection:text-white">
             
-            <nav class="bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-900 text-white shadow-xl p-5 mb-8 sticky top-0 z-40">
-                <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-                    <div class="font-black text-2xl tracking-tight flex items-center">
-                        <div class="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center mr-3 border border-indigo-400/30">
-                            <i class="fas fa-shield-alt text-indigo-400"></i>
-                        </div>
-                        QITO <span class="text-indigo-400 font-light ml-1">ADMIN</span>
-                    </div>
-                    
-                    <form action="/admin/search" method="POST" class="w-full md:w-96 relative group">
-                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                            <i class="fas fa-search text-slate-400 group-focus-within:text-indigo-400 transition"></i>
-                        </div>
-                        <input type="text" name="query" placeholder="Search by ssconf link or Token..." required class="w-full bg-slate-800/50 border border-slate-700 text-white text-sm rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block pl-10 p-3 transition-all outline-none placeholder-slate-500">
-                        <button type="submit" class="absolute inset-y-0 right-0 pr-3 flex items-center text-xs font-bold text-indigo-400 hover:text-indigo-300">FIND</button>
-                    </form>
-                </div>
-            </nav>
+            ${getNavbar()}
+            ${getLoadingModal()}
 
             <div class="max-w-7xl mx-auto px-4">
                 
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10 animate-fade-in-up">
-                    
-                    <div class="lg:col-span-2 bg-white p-7 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6">
-                        <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
-                            <label class="block text-lg font-black text-slate-800 mb-5 flex items-center">
-                                <i class="fas fa-key text-yellow-500 mr-2 text-xl drop-shadow"></i> Save Master API
-                            </label>
-                            <form action="/admin/add-master" method="POST" class="grid grid-cols-1 gap-3">
-                                <input type="text" name="name" placeholder="Name (e.g., API-1)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
-                                <input type="text" name="ip" placeholder="URL (http://ip:8888)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
-                                <input type="password" name="apiKey" placeholder="API Key" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
-                                <button type="submit" class="mt-2 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]">
-                                    <i class="fas fa-save mr-2"></i> Save API
-                                </button>
-                            </form>
-                        </div>
-                        <div class="flex-1 pl-0 md:pl-2">
-                            <label class="block text-xs font-black text-slate-400 mb-3 uppercase tracking-widest">Saved APIs</label>
-                            <div class="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                                ${mastersListHtml || '<p class="text-sm text-slate-400 italic">No APIs saved yet.</p>'}
-                            </div>
-                        </div>
+                <div class="bg-white p-7 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 mb-10 animate-fade-in-up">
+                    <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
+                        <label class="block text-lg font-black text-slate-800 mb-5 flex items-center">
+                            <i class="fas fa-key text-yellow-500 mr-2 text-xl drop-shadow"></i> Save Master API
+                        </label>
+                        <form action="/admin/add-master" method="POST" class="grid grid-cols-1 gap-3">
+                            <input type="text" name="name" placeholder="Name (e.g., API-1)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                            <input type="text" name="ip" placeholder="URL (http://ip:8888)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                            <input type="password" name="apiKey" placeholder="API Key" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                            <button type="submit" class="mt-2 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]">
+                                <i class="fas fa-save mr-2"></i> Save API
+                            </button>
+                        </form>
                     </div>
-
-                    <div class="bg-gradient-to-br from-indigo-50 to-blue-50 p-7 rounded-[2rem] shadow-sm border border-indigo-100">
-                        <div class="flex justify-between items-center mb-5">
-                            <label class="block text-lg font-black text-slate-800 flex items-center">
-                                <i class="fas fa-database text-indigo-500 mr-2 text-xl drop-shadow"></i> Backup & Restore
-                            </label>
-                            <form action="/admin/backup-all" method="POST" class="m-0">
-                                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-md transition active:scale-95" title="Backup Entire System">
-                                    <i class="fas fa-cloud-download-alt mr-1"></i> Full Backup
-                                </button>
-                            </form>
-                        </div>
-                        <div class="bg-white rounded-2xl p-3 border border-slate-200 shadow-inner h-60 overflow-y-auto">
-                            ${backupHtml}
+                    <div class="flex-1 pl-0 md:pl-2">
+                        <label class="block text-xs font-black text-slate-400 mb-3 uppercase tracking-widest">Saved APIs</label>
+                        <div class="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                            ${mastersListHtml || '<p class="text-sm text-slate-400 italic">No APIs saved yet.</p>'}
                         </div>
                     </div>
                 </div>
@@ -286,7 +307,6 @@ adminApp.get('/', async (req, res) => {
             </div>
 
             <script>
-                // Fetch Groups Logic
                 async function fetchGroupsFromSaved() {
                     const selector = document.getElementById('savedMasterSelector').value; 
                     const btn = document.getElementById('fetchBtn');
@@ -335,7 +355,6 @@ adminApp.get('/', async (req, res) => {
                     }
                 }
 
-                // 🌟 Double Confirm Modal Logic
                 function openDoubleConfirmModal(groupName) {
                     document.getElementById('deleteGroupNameInput').value = groupName;
                     document.getElementById('deleteModalGroupName').innerText = groupName;
@@ -365,12 +384,121 @@ adminApp.get('/', async (req, res) => {
     `);
 });
 
+// ==========================================
+// 🌟 SETTINGS & BACKUP PAGE 🌟
+// ==========================================
+adminApp.get('/settings', async (req, res) => {
+    let fullBackups = [];
+    let groupBackups = [];
+    
+    if (fs.existsSync(backupDir)) {
+        const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.json')).sort().reverse();
+        files.forEach(f => {
+            if (f.startsWith('Full_Backup')) fullBackups.push(f);
+            else if (f.startsWith('Group_')) groupBackups.push(f);
+        });
+    }
+
+    const renderBackupItem = (b, type) => {
+        const dateMatch = b.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
+        const dateStr = dateMatch ? dateMatch[1].replace('_', ' at ').replace(/-/g, ':').replace(/:/, '-').replace(/:/, '-') : 'Unknown Date';
+        const badgeColor = type === 'full' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700';
+        
+        return `
+        <div class="flex justify-between items-center bg-slate-50 p-4 rounded-2xl mb-3 border border-slate-100 hover:border-indigo-200 transition-all duration-300">
+            <div>
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="${badgeColor} px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest shadow-sm">${type}</span>
+                    <span class="text-sm font-bold text-slate-700">${b}</span>
+                </div>
+                <div class="text-[11px] text-slate-500 font-semibold"><i class="far fa-clock mr-1"></i> ${dateStr} (MMT)</div>
+            </div>
+            <div class="flex gap-2">
+                <a href="/admin/download-backup/${encodeURIComponent(b)}" class="bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-300 px-3 py-2 rounded-xl text-sm font-bold transition shadow-sm" title="Download to PC"><i class="fas fa-download"></i></a>
+                <button type="button" onclick="triggerUpload('${type}')" class="bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white px-3 py-2 rounded-xl text-sm font-bold transition shadow-sm" title="Restore this file"><i class="fas fa-undo"></i></button>
+                <form action="/admin/delete-backup" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာလား?');" class="m-0">
+                    <input type="hidden" name="filename" value="${b}">
+                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-xl text-sm font-bold transition shadow-sm" title="Delete"><i class="fas fa-trash"></i></button>
+                </form>
+            </div>
+        </div>`;
+    };
+
+    let fullHtml = fullBackups.length > 0 ? fullBackups.map(b => renderBackupItem(b, 'full')).join('') : '<p class="text-slate-400 text-sm p-4 text-center">No Full Backups Found.</p>';
+    let groupHtml = groupBackups.length > 0 ? groupBackups.map(b => renderBackupItem(b, 'group')).join('') : '<p class="text-slate-400 text-sm p-4 text-center">No Group Backups Found.</p>';
+
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Settings & Backups - QITO Tech</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+            <style>
+                @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+                .animate-fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
+            </style>
+        </head>
+        <body class="bg-[#f8fafc] font-sans pb-10">
+            ${getNavbar("System <span class='text-indigo-400 font-light ml-1'>SETTINGS</span>")}
+            ${getLoadingModal()}
+
+            <div class="max-w-6xl mx-auto px-4 animate-fade-in-up">
+                <div class="mb-8">
+                    <h2 class="text-3xl font-black text-slate-800"><i class="fas fa-database text-indigo-500 mr-3"></i> Backup Management</h2>
+                    <p class="text-slate-500 font-semibold mt-2">Manage your system backups. All times are in Myanmar Standard Time (MMT).</p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200">
+                        <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                            <h3 class="text-xl font-black text-slate-800"><i class="fas fa-globe text-purple-500 mr-2"></i> Full System Backups</h3>
+                        </div>
+                        <div class="flex gap-3 mb-6">
+                            <form action="/admin/backup-all" method="POST" class="flex-1 m-0">
+                                <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(147,51,234,0.3)] active:scale-[0.98]">
+                                    <i class="fas fa-plus-circle mr-2"></i> Create Full Backup
+                                </button>
+                            </form>
+                            <button type="button" onclick="triggerUpload('full')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">
+                                <i class="fas fa-upload mr-2"></i> Manual Upload
+                            </button>
+                        </div>
+                        <div class="max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                            ${fullHtml}
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200">
+                        <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                            <h3 class="text-xl font-black text-slate-800"><i class="fas fa-users text-blue-500 mr-2"></i> Group Backups</h3>
+                        </div>
+                        <div class="mb-6">
+                            <button type="button" onclick="triggerUpload('group')" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">
+                                <i class="fas fa-upload mr-2"></i> Manual Upload Group Backup
+                            </button>
+                            <p class="text-[11px] text-slate-400 mt-2 text-center">To create a Group Backup, go to the specific Group's page.</p>
+                        </div>
+                        <div class="max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                            ${groupHtml}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            ${getUploadScript()}
+        </body>
+        </html>
+    `);
+});
+
 // 🌟 SEARCH LOGIC 🌟
 adminApp.post('/search', async (req, res) => {
     try {
         const query = req.body.query.trim();
         let token = query;
-        // Extract token if it's a full ssconf link
         const match = query.match(/\/([A-Za-z0-9]+)\.json/);
         if (match) token = match[1];
 
@@ -378,14 +506,14 @@ adminApp.post('/search', async (req, res) => {
         if (user) {
             res.redirect('/admin/group/' + encodeURIComponent(user.groupName) + '?highlight=' + token);
         } else {
-            res.send(`<script>alert('User or Token not found!'); window.location.href='/admin';</script>`);
+            res.send(`<script>alert('User or Token not found in database!'); window.location.href='/admin';</script>`);
         }
     } catch(e) {
         res.redirect('/admin');
     }
 });
 
-// 🌟 BACKUP LOGIC (FULL) 🌟
+// 🌟 BACKUP GENERATION LOGIC 🌟
 adminApp.post('/backup-all', async (req, res) => {
     try {
         const groups = await Group.find({});
@@ -393,70 +521,75 @@ adminApp.post('/backup-all', async (req, res) => {
         const users = await User.find({});
         
         const data = { type: 'full', date: new Date(), groups, masters, users };
-        const filename = `Full_Backup_${Date.now()}.json`;
+        const filename = `Full_Backup_${getMMTString()}.json`;
         
         fs.writeFileSync(path.join(backupDir, filename), JSON.stringify(data, null, 2));
-        res.send(`<script>alert('Full Backup ယူပြီးပါပြီ!'); window.location.href='/admin';</script>`);
+        res.redirect('/admin/settings');
     } catch (err) {
         res.status(500).send("Error creating backup.");
     }
 });
 
-// 🌟 RESTORE BACKUP LOGIC 🌟
-adminApp.post('/restore-backup', async (req, res) => {
+adminApp.post('/backup-group', async (req, res) => {
+    try {
+        const groupName = req.body.groupName;
+        const group = await Group.findOne({ name: groupName });
+        const users = await User.find({ groupName: groupName });
+        
+        const data = { type: 'group', groupName: groupName, date: new Date(), group, users };
+        const filename = `Group_${groupName}_${getMMTString()}.json`.replace(/\s+/g, '_');
+        
+        fs.writeFileSync(path.join(backupDir, filename), JSON.stringify(data, null, 2));
+        res.redirect('/admin/settings');
+    } catch (err) {
+        res.status(500).send("Error creating group backup.");
+    }
+});
+
+// 🌟 DOWNLOAD & DELETE BACKUP 🌟
+adminApp.get('/download-backup/:filename', (req, res) => {
+    const filePath = path.join(backupDir, req.params.filename);
+    if (fs.existsSync(filePath)) res.download(filePath);
+    else res.status(404).send('Backup File not found');
+});
+
+adminApp.post('/delete-backup', (req, res) => {
     try {
         const { filename } = req.body;
         const filePath = path.join(backupDir, filename);
-        if (!fs.existsSync(filePath)) return res.send("Backup file not found!");
-        
-        const rawData = fs.readFileSync(filePath);
-        const data = JSON.parse(rawData);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        res.redirect('/admin/settings');
+    } catch(e) { res.redirect('/admin/settings'); }
+});
 
-        const cleanObj = (obj) => {
-            const { _id, __v, ...rest } = obj._doc || obj;
-            return rest;
-        };
+// 🌟 RESTORE FROM UPLOAD API 🌟
+adminApp.post('/api/restore-upload', async (req, res) => {
+    try {
+        const { data, expectedGroup } = req.body;
+        if(!data) return res.json({success: false, error: 'No data received.'});
+        
+        const cleanObj = (obj) => { const { _id, __v, ...rest } = obj._doc || obj; return rest; };
 
         if (data.type === 'full') {
             if(data.groups) for (let g of data.groups) await Group.updateOne({name: g.name}, {$set: cleanObj(g)}, {upsert: true});
             if(data.masters) for (let m of data.masters) await Master.updateOne({ip: m.ip}, {$set: cleanObj(m)}, {upsert: true});
             if(data.users) for (let u of data.users) await User.updateOne({token: u.token}, {$set: cleanObj(u)}, {upsert: true});
         } else if (data.type === 'group') {
+            // Check if user is inside a specific group and uploading the wrong group backup
+            if (expectedGroup && data.groupName !== expectedGroup) {
+                return res.json({success: false, error: `This backup belongs to [${data.groupName}], but you are in [${expectedGroup}].`});
+            }
             if(data.group) await Group.updateOne({name: data.group.name}, {$set: cleanObj(data.group)}, {upsert: true});
             if(data.users) for (let u of data.users) await User.updateOne({token: u.token}, {$set: cleanObj(u)}, {upsert: true});
+        } else {
+            return res.json({success: false, error: 'Invalid Backup Type.'});
         }
-        res.send(`<script>alert('Backup ဖိုင် ပြန်လည်ဖြည့်သွင်းခြင်း အောင်မြင်ပါသည်!'); window.location.href='/admin';</script>`);
-    } catch (err) {
-        res.status(500).send("Error restoring backup: " + err.message);
+        res.json({success: true});
+    } catch(e) {
+        res.json({success: false, error: e.message});
     }
 });
 
-// 🌟 DELETE BACKUP FILE 🌟
-adminApp.post('/delete-backup', (req, res) => {
-    try {
-        const { filename } = req.body;
-        const filePath = path.join(backupDir, filename);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-        res.redirect('/admin');
-    } catch(e) { res.redirect('/admin'); }
-});
-
-
-adminApp.post('/add-master', async (req, res) => {
-    try { 
-        let { name, ip, apiKey } = req.body; 
-        ip = ip.replace(/\/$/, ""); 
-        await Master.create({ name, ip, apiKey }); 
-        res.redirect('/admin'); 
-    } catch (e) { 
-        res.status(500).send("Error saving Master."); 
-    }
-});
-
-adminApp.post('/delete-master', async (req, res) => { 
-    await Master.findByIdAndDelete(req.body.id); 
-    res.redirect('/admin'); 
-});
 
 adminApp.post('/api/fetch-master-groups', async (req, res) => {
     try { 
@@ -520,11 +653,11 @@ adminApp.post('/delete-group', async (req, res) => {
 });
 
 // ==========================================
-// 2. INSIDE GROUP VIEW (WITH GROUP BACKUP & HIGHLIGHT)
+// 2. INSIDE GROUP VIEW (WITH MANUAL UPLOAD & DOWNLOAD)
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
-    const highlightToken = req.query.highlight; // Highlighted token from Search
+    const highlightToken = req.query.highlight; 
     
     const groupInfo = await Group.findOne({ name: groupName });
     const users = await User.find({ groupName: groupName }).sort({ userNo: 1 }); 
@@ -540,15 +673,15 @@ adminApp.get('/group/:name', async (req, res) => {
         const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
         const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
         
-        // Highlight Row Logic
-        const isHighlighted = (u.token === highlightToken) ? 'bg-yellow-100 border-l-4 border-yellow-500 animate-pulse transition-colors' : 'hover:bg-indigo-50/50';
+        // 🌟 Search Highlight Style 🌟
+        const isHighlighted = (u.token === highlightToken) ? 'bg-yellow-100 border-l-4 border-yellow-500 animate-pulse transition-colors shadow-inner' : 'hover:bg-indigo-50/50';
 
         usersHtml += `
-        <tr id="user-${u.token}" class="border-b border-slate-100 ${isHighlighted} transition duration-300">
+        <tr id="user-${u.token}" class="border-b border-slate-100 ${isHighlighted} transition duration-500">
             <td class="p-4 text-slate-800 font-black">#${u.userNo || '-'}</td>
             <td class="p-4">
                 <div class="font-bold text-slate-800">${u.name}</div>
-                <div class="text-xs text-indigo-500 font-mono bg-indigo-50 px-2 py-0.5 rounded inline-block mt-1">${u.token}</div>
+                <div class="text-xs text-indigo-500 font-mono bg-indigo-50 px-2 py-0.5 rounded inline-block mt-1 border border-indigo-100 shadow-sm">${u.token}</div>
             </td>
             <td class="p-4">
                 <span class="bg-slate-200 px-2 py-1 rounded text-[11px] font-black uppercase text-slate-600 mr-2">${serverCount} Nodes</span>
@@ -606,8 +739,11 @@ adminApp.get('/group/:name', async (req, res) => {
         </head>
         <body class="bg-[#f8fafc] font-sans pb-10">
             
-            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8 sticky top-0 z-40">
-                <div class="max-w-7xl mx-auto flex items-center justify-between">
+            ${getNavbar()}
+            ${getLoadingModal()}
+
+            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8 -mt-8 sticky top-[88px] z-30 animate-fade-in-up">
+                <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
                     <div class="flex items-center">
                         <a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl transition transform hover:-translate-x-1">
                             <i class="fas fa-arrow-left"></i>
@@ -617,15 +753,19 @@ adminApp.get('/group/:name', async (req, res) => {
                             ${groupInfo.masterName || 'API'}
                         </span>
                     </div>
-                    <div class="flex items-center gap-3">
+                    <div class="flex flex-wrap items-center gap-3">
                         <div class="hidden md:block text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-xl border border-slate-200">
                             <i class="fas fa-link text-indigo-400 mr-1"></i> ${groupInfo.masterIp || 'Not Linked'}
                         </div>
                         
+                        <button type="button" onclick="triggerUpload('group', '${groupName}')" class="bg-slate-800 text-white hover:bg-black px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm flex items-center">
+                            <i class="fas fa-upload mr-2"></i> Upload Backup
+                        </button>
+                        
                         <form action="/admin/backup-group" method="POST" class="m-0">
                             <input type="hidden" name="groupName" value="${groupName}">
                             <button type="submit" class="bg-blue-100 text-blue-700 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm border border-blue-200 flex items-center" title="Backup this specific group">
-                                <i class="fas fa-save mr-2"></i> Backup Group
+                                <i class="fas fa-download mr-2"></i> Download Backup
                             </button>
                         </form>
 
@@ -715,8 +855,10 @@ adminApp.get('/group/:name', async (req, res) => {
                 </div>
             </div>
 
+            ${getUploadScript()}
+
             <script>
-                // Auto scroll to highlighted user from Search
+                // 🌟 Auto scroll to highlighted user from Search 🌟
                 window.onload = () => {
                     const urlParams = new URLSearchParams(window.location.search);
                     const highlight = urlParams.get('highlight');
@@ -778,23 +920,6 @@ adminApp.get('/group/:name', async (req, res) => {
         </body>
         </html>
     `);
-});
-
-// 🌟 GROUP BACKUP LOGIC 🌟
-adminApp.post('/backup-group', async (req, res) => {
-    try {
-        const groupName = req.body.groupName;
-        const group = await Group.findOne({ name: groupName });
-        const users = await User.find({ groupName: groupName });
-        
-        const data = { type: 'group', groupName: groupName, date: new Date(), group, users };
-        const filename = `Group_${groupName}_${Date.now()}.json`.replace(/\s+/g, '_');
-        
-        fs.writeFileSync(path.join(backupDir, filename), JSON.stringify(data, null, 2));
-        res.send(`<script>alert('${groupName} Group Backup ယူပြီးပါပြီ!'); window.location.href='/admin/group/${encodeURIComponent(groupName)}';</script>`);
-    } catch (err) {
-        res.status(500).send("Error creating group backup.");
-    }
 });
 
 adminApp.post('/edit-user', async (req, res) => {
