@@ -43,7 +43,7 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
 });
 
 // ==========================================
-// 2. USER WEB PANEL (PREMIUM UI)
+// 2. USER WEB PANEL (PREMIUM UI WITH CUSTOM MODAL)
 // ==========================================
 userApp.get('/panel/:token', async (req, res) => {
     try {
@@ -55,11 +55,12 @@ userApp.get('/panel/:token', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
 
-        // 🌟 One-Click App Import Links တည်ဆောက်ခြင်း
+        // 🌟 One-Click App Import Links (SSCONF အသုံးပြုထားသည်)
         const encodedName = encodeURIComponent(user.name.replace(/\s+/g, ''));
-        const httpLink = `http://${domainName}/${token}.json#VPN-${encodedName}`; // Standard Link
-        const ssconfLink = `ssconf://${domainName}/${token}.json#VPN-${encodedName}`; // Outline Link
-        const hiddifyLink = `hiddify://import/${httpLink}`; // Hiddify Deep Link
+        const ssconfLink = `ssconf://${domainName}/${token}.json#VPN-${encodedName}`; 
+        
+        // Hiddify တွင် import လုပ်ရန် ssconf link ကို အသုံးပြုသည်
+        const hiddifyLink = `hiddify://import/${ssconfLink}`; 
 
         // 🌟 Premium Server List တည်ဆောက်ခြင်း
         let nodesListHtml = '';
@@ -69,6 +70,7 @@ userApp.get('/panel/:token', async (req, res) => {
             Object.keys(user.accessKeys).forEach(serverName => {
                 nodeNames.push(serverName);
                 const isSelected = user.currentServer === serverName;
+                const safeNodeId = serverName.replace(/\s+/g, '-');
                 
                 const activeClass = isSelected ? 'bg-indigo-900/30 border-l-4 border-indigo-500' : 'hover:bg-slate-800/50';
                 const iconColor = isSelected ? 'text-indigo-400' : 'text-slate-400';
@@ -76,12 +78,12 @@ userApp.get('/panel/:token', async (req, res) => {
                     `<i class="fas fa-check-circle text-indigo-500 text-lg"></i>` : 
                     `<i class="fas fa-arrow-circle-right text-slate-600 hover:text-slate-400 transition text-lg"></i>`;
 
-                // 🌟 Server Switch Confirmation (သေချာလား မေးမည့်စနစ် ထည့်ထားသည်)
+                // 🌟 Custom Modal အတွက် Button ပြင်ဆင်ထားသည် (Browser Confirm အစား)
                 nodesListHtml += `
-                <form action="/panel/change-server" method="POST" class="m-0 border-b border-slate-800 last:border-0" onsubmit="return confirm('ဒီ Server ကို တကယ် ပြောင်းမှာ သေချာပြီလား? ⚡');">
+                <form id="form-${safeNodeId}" action="/panel/change-server" method="POST" class="m-0 border-b border-slate-800 last:border-0">
                     <input type="hidden" name="token" value="${token}">
                     <input type="hidden" name="newServer" value="${serverName}">
-                    <button type="submit" class="w-full flex justify-between items-center p-4 transition-all duration-200 ${activeClass}">
+                    <button type="button" onclick="confirmSwitch('form-${safeNodeId}', '${serverName}')" class="w-full flex justify-between items-center p-4 transition-all duration-200 ${activeClass}">
                         <div class="flex items-center gap-3">
                             <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
                                 <i class="fas fa-globe ${iconColor} text-sm"></i>
@@ -89,7 +91,7 @@ userApp.get('/panel/:token', async (req, res) => {
                             <span class="font-bold ${isSelected ? 'text-white' : 'text-slate-300'} text-[15px] tracking-wide">${serverName}</span>
                         </div>
                         <div class="flex items-center gap-4">
-                            <span id="ping-${serverName.replace(/\s+/g, '-')}" class="text-xs font-semibold text-slate-500 w-16 text-right tracking-wider">
+                            <span id="ping-${safeNodeId}" class="text-xs font-semibold text-slate-500 w-16 text-right tracking-wider">
                                 <i class="fas fa-circle-notch fa-spin text-slate-600"></i>
                             </span>
                             ${checkIcon}
@@ -104,13 +106,16 @@ userApp.get('/panel/:token', async (req, res) => {
 
         const usagePercent = user.totalGB > 0 ? ((user.usedGB / user.totalGB) * 100).toFixed(1) : 0;
 
+        // 🌟 သင်၏ Logo Link ကို အောက်ပါ နေရာတွင် အစားထိုးနိုင်ပါသည်
+        const logoUrl = "https://via.placeholder.com/150x150/1e293b/6366f1?text=QT"; 
+
         res.send(`
             <!DOCTYPE html>
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Premium VPN Panel</title>
+                <title>QITO Tech Premium Outline</title>
                 <script src="https://cdn.tailwindcss.com"></script>
                 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
                 <style>
@@ -121,52 +126,60 @@ userApp.get('/panel/:token', async (req, res) => {
                 
                 <div class="max-w-md mx-auto px-4 pt-8">
                     <div class="flex justify-between items-center mb-6">
-                        <div>
-                            <h1 class="text-2xl font-black text-white tracking-tight">Premium<span class="text-indigo-500">VPN</span></h1>
-                            <p class="text-sm font-medium text-slate-400 mt-1">Username: <span class="text-slate-300">${user.name}</span></p>
+                        <div class="flex items-center gap-4">
+                            <img src="${logoUrl}" alt="Logo" class="w-12 h-12 rounded-full border-2 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)] object-cover bg-slate-800">
+                            <div>
+                                <h1 class="text-xl font-black text-white tracking-tight leading-tight">QITO Tech</h1>
+                                <p class="text-xs font-black text-indigo-400 tracking-widest uppercase">Premium Outline</p>
+                            </div>
                         </div>
-                        <div class="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
-                            <i class="fas fa-crown text-yellow-500 text-sm"></i>
+                        <div class="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 shadow-sm flex items-center gap-1.5">
+                            <i class="fas fa-crown text-yellow-500 text-[10px]"></i>
+                            <span class="text-[10px] font-bold text-slate-300 uppercase">VIP</span>
                         </div>
                     </div>
 
-                    <div class="bg-[#151f32] rounded-2xl p-5 shadow-lg border border-slate-800 mb-6 relative overflow-hidden">
-                        <div class="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
-                        <div class="flex justify-between items-end mb-2 relative z-10">
+                    <div class="mb-5 ml-1">
+                        <p class="text-sm font-bold text-slate-400">Username: <span class="text-white text-base tracking-wide">${user.name}</span></p>
+                    </div>
+
+                    <div class="bg-[#151f32] rounded-3xl p-6 shadow-xl border border-slate-800 mb-6 relative overflow-hidden">
+                        <div class="absolute top-0 right-0 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
+                        <div class="flex justify-between items-end mb-3 relative z-10">
                             <div>
-                                <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Data Usage</p>
-                                <div class="text-3xl font-black text-white">${user.usedGB} <span class="text-sm text-slate-500 font-bold">/ ${user.totalGB} GB</span></div>
+                                <p class="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1.5">Data Usage</p>
+                                <div class="text-4xl font-black text-white">${user.usedGB} <span class="text-base text-slate-500 font-bold">/ ${user.totalGB} GB</span></div>
                             </div>
                         </div>
-                        <div class="w-full bg-slate-800 rounded-full h-2.5 mt-3 relative z-10 overflow-hidden">
-                            <div class="bg-gradient-to-r from-indigo-600 to-indigo-400 h-2.5 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.5)]" style="width: ${usagePercent}%"></div>
+                        <div class="w-full bg-slate-800 rounded-full h-3 mt-4 relative z-10 overflow-hidden shadow-inner">
+                            <div class="bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-500 h-3 rounded-full shadow-[0_0_15px_rgba(99,102,241,0.6)]" style="width: ${usagePercent}%"></div>
                         </div>
-                        <div class="mt-4 pt-4 border-t border-slate-800/80 flex justify-between items-center relative z-10">
-                            <span class="text-xs font-bold text-slate-500"><i class="far fa-clock mr-1"></i> Expire Date</span>
-                            <span class="text-xs font-bold text-yellow-500">${user.expireDate}</span>
+                        <div class="mt-5 pt-5 border-t border-slate-800 flex justify-between items-center relative z-10">
+                            <span class="text-[13px] font-bold text-slate-500"><i class="far fa-calendar-alt mr-1.5 text-slate-600"></i> Expires On</span>
+                            <span class="text-[13px] font-black text-yellow-500">${user.expireDate}</span>
                         </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-3 mb-3">
-                        <a href="${ssconfLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3 px-2 rounded-2xl flex items-center justify-center gap-2 transition active:scale-95 shadow-sm">
-                            <i class="fas fa-key text-teal-400 text-lg"></i> Outline
+                        <a href="${ssconfLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3.5 px-2 rounded-2xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md">
+                            <img src="https://raw.githubusercontent.com/Jigsaw-Code/outline-client/master/scripts/apple_icon_1024.png" class="w-5 h-5 rounded" onerror="this.src=''; this.className='hidden';"> 
+                            <span class="tracking-wide">Outline</span>
                         </a>
-                        <a href="${hiddifyLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3 px-2 rounded-2xl flex items-center justify-center gap-2 transition active:scale-95 shadow-sm">
-                            <i class="fas fa-rocket text-blue-400 text-lg"></i> Hiddify
+                        <a href="${hiddifyLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3.5 px-2 rounded-2xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md">
+                            <i class="fas fa-paper-plane text-blue-400 text-lg"></i> 
+                            <span class="tracking-wide">Hiddify</span>
                         </a>
                     </div>
 
-                    <button id="copyBtn" onclick="copyLink('${httpLink}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-2xl shadow-[0_4px_14px_rgba(79,70,229,0.4)] mb-8 transition-all active:scale-[0.98] flex justify-center items-center gap-2">
-                        <i class="fas fa-copy text-lg"></i> COPY SUBSCRIPTION
+                    <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-[0_6px_20px_rgba(79,70,229,0.35)] mb-8 transition-all active:scale-[0.98] flex justify-center items-center gap-2.5 uppercase tracking-wider text-sm">
+                        <i class="fas fa-copy text-lg"></i> Copy Subscription Link
                     </button>
 
-                    <h3 class="text-[13px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Available Servers</h3>
+                    <h3 class="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 ml-2">Available Servers</h3>
                     
-                    <div class="bg-[#151f32] rounded-2xl overflow-hidden shadow-lg border border-slate-800">
-                        <div class="bg-slate-800/40 p-4 text-sm font-bold text-white border-b border-slate-800 flex justify-between items-center">
-                            <div class="flex items-center gap-2">
-                                <i class="fas fa-server text-indigo-500"></i> ${user.groupName}
-                            </div>
+                    <div class="bg-[#151f32] rounded-3xl overflow-hidden shadow-xl border border-slate-800">
+                        <div class="bg-slate-800/30 p-4 text-[13px] font-bold text-slate-300 border-b border-slate-800 flex items-center gap-2">
+                            <i class="fas fa-network-wired text-indigo-500"></i> Node Group: ${user.groupName}
                         </div>
                         <div class="flex flex-col">
                             ${nodesListHtml}
@@ -174,10 +187,72 @@ userApp.get('/panel/:token', async (req, res) => {
                     </div>
                 </div>
                 
+                <div id="switchModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-[#0b1121]/80 backdrop-blur-md opacity-0 transition-opacity duration-300">
+                    <div class="bg-[#151f32] border border-slate-700 rounded-[2rem] p-8 w-[85%] max-w-sm shadow-[0_0_40px_rgba(0,0,0,0.5)] transform scale-95 transition-transform duration-300 relative overflow-hidden" id="modalContent">
+                        
+                        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-indigo-500/20 rounded-full blur-3xl -mt-10"></div>
+                        
+                        <div class="text-center relative z-10">
+                            <div class="w-20 h-20 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto mb-5 border border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.2)]">
+                                <i class="fas fa-exchange-alt text-indigo-400 text-3xl"></i>
+                            </div>
+                            <h3 class="text-2xl font-black text-white mb-2 tracking-tight">Switch Server?</h3>
+                            <p class="text-slate-400 text-[15px] mb-8 leading-relaxed">
+                                Are you sure you want to connect to <br>
+                                <b id="modalServerName" class="text-indigo-400 text-lg tracking-wide block mt-1">Server</b>
+                            </p>
+                            
+                            <div class="flex gap-3">
+                                <button onclick="closeModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">Cancel</button>
+                                <button id="confirmBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(79,70,229,0.4)] active:scale-[0.98]">Confirm</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <script>
                     const nodes = ${JSON.stringify(nodeNames)};
                     const token = '${token}';
+                    let currentFormId = '';
 
+                    // 🌟 Premium Modal Logic
+                    function confirmSwitch(formId, serverName) {
+                        currentFormId = formId;
+                        document.getElementById('modalServerName').innerText = serverName;
+                        
+                        const modal = document.getElementById('switchModal');
+                        const content = document.getElementById('modalContent');
+                        
+                        modal.classList.remove('hidden');
+                        modal.classList.add('flex');
+                        
+                        setTimeout(() => {
+                            modal.classList.remove('opacity-0');
+                            content.classList.remove('scale-95');
+                        }, 10);
+                    }
+
+                    function closeModal() {
+                        const modal = document.getElementById('switchModal');
+                        const content = document.getElementById('modalContent');
+                        
+                        modal.classList.add('opacity-0');
+                        content.classList.add('scale-95');
+                        
+                        setTimeout(() => {
+                            modal.classList.add('hidden');
+                            modal.classList.remove('flex');
+                        }, 300);
+                    }
+
+                    document.getElementById('confirmBtn').addEventListener('click', () => {
+                        if(currentFormId) {
+                            document.getElementById('confirmBtn').innerHTML = '<i class="fas fa-circle-notch fa-spin text-xl"></i>';
+                            document.getElementById(currentFormId).submit();
+                        }
+                    });
+
+                    // Background Ping Logic
                     async function fetchPings() {
                         for(let node of nodes) {
                             try {
@@ -189,18 +264,19 @@ userApp.get('/panel/:token', async (req, res) => {
 
                                 if(data.status === 'online' && data.latency_ms) {
                                     let latency = Math.round(data.latency_ms);
-                                    let color = latency < 100 ? 'text-green-500' : (latency < 200 ? 'text-yellow-500' : 'text-red-500');
-                                    pingEl.innerHTML = \`<span class="\${color} font-bold"><i class="fas fa-wifi text-[10px] mr-1"></i>\${latency}ms</span>\`;
+                                    let color = latency < 100 ? 'text-green-400' : (latency < 200 ? 'text-yellow-400' : 'text-red-400');
+                                    pingEl.innerHTML = \`<span class="\${color} font-bold drop-shadow-[0_0_5px_rgba(0,0,0,0.5)]"><i class="fas fa-signal text-[10px] mr-1"></i>\${latency} ms</span>\`;
                                 } else {
                                     pingEl.innerHTML = '<span class="text-slate-600 font-bold text-[11px] uppercase">Offline</span>';
                                 }
                             } catch(e) {
                                 let safeNodeId = node.replace(/\\s+/g, '-');
-                                document.getElementById('ping-' + safeNodeId).innerHTML = '<span class="text-slate-600 text-xs">Error</span>';
+                                document.getElementById('ping-' + safeNodeId).innerHTML = '<span class="text-slate-700 text-[11px]">Error</span>';
                             }
                         }
                     }
 
+                    // Copy Link Function
                     function copyLink(link) { 
                         var t = document.createElement("input"); 
                         t.value = link; 
@@ -213,13 +289,13 @@ userApp.get('/panel/:token', async (req, res) => {
                         btn.innerHTML = '<i class="fas fa-check-circle text-lg"></i> LINK COPIED!'; 
                         btn.classList.replace('bg-indigo-600', 'bg-teal-500'); 
                         btn.classList.replace('hover:bg-indigo-500', 'hover:bg-teal-400');
-                        btn.classList.replace('shadow-[0_4px_14px_rgba(79,70,229,0.4)]', 'shadow-[0_4px_14px_rgba(20,184,166,0.4)]');
+                        btn.classList.replace('shadow-[0_6px_20px_rgba(79,70,229,0.35)]', 'shadow-[0_6px_20px_rgba(20,184,166,0.35)]');
                         
                         setTimeout(() => { 
-                            btn.innerHTML = '<i class="fas fa-copy text-lg"></i> COPY SUBSCRIPTION'; 
+                            btn.innerHTML = '<i class="fas fa-copy text-lg"></i> Copy Subscription Link'; 
                             btn.classList.replace('bg-teal-500', 'bg-indigo-600'); 
                             btn.classList.replace('hover:bg-teal-400', 'hover:bg-indigo-500');
-                            btn.classList.replace('shadow-[0_4px_14px_rgba(20,184,166,0.4)]', 'shadow-[0_4px_14px_rgba(79,70,229,0.4)]');
+                            btn.classList.replace('shadow-[0_6px_20px_rgba(20,184,166,0.35)]', 'shadow-[0_6px_20px_rgba(79,70,229,0.35)]');
                         }, 3000); 
                     }
 
@@ -338,28 +414,19 @@ userApp.get('/:token.json', async (req, res) => {
 // 5. SUPER FORGIVING AUTO-RECEIVE WEBHOOK
 // ==========================================
 userApp.post('/api/internal/sync-new-server', async (req, res) => {
-    console.log("\n[WEBHOOK RECEIVED] /api/internal/sync-new-server");
-
     try {
         const apiKey = req.headers['x-api-key'];
         const { newServerName, userKeys } = req.body;
 
-        if (!newServerName || !userKeys) {
-            console.log("❌ Invalid Data Sent by Master");
-            return res.status(400).json({ error: "Invalid payload data" });
-        }
+        if (!newServerName || !userKeys) return res.status(400).json({ error: "Invalid payload data" });
 
         const validGroup = await Group.findOne({ masterApiKey: apiKey });
-        if (!validGroup) {
-            console.log("❌ Unauthorized API Key");
-            return res.status(401).json({ error: "Unauthorized" });
-        }
+        if (!validGroup) return res.status(401).json({ error: "Unauthorized" });
 
         let successCount = 0;
         
         for (const [identifier, newConfig] of Object.entries(userKeys)) {
             const escapedIdentifier = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            
             const user = await User.findOne({ 
                 $or: [
                     { token: identifier }, 
@@ -372,21 +439,12 @@ userApp.post('/api/internal/sync-new-server', async (req, res) => {
                     { _id: user._id }, 
                     { $set: { [`accessKeys.${newServerName}`]: newConfig } }
                 );
-                
                 try { await redisClient.del(user.token); } catch(e){}
                 successCount++;
             }
         }
-
-        if (successCount === 0) {
-            console.log(`❌ FAILED: Received ${Object.keys(userKeys).length} keys, but matched 0 users.`);
-        } else {
-            console.log(`✅ SUCCESS: Synced ${newServerName} for ${successCount} users!`);
-        }
-
         return res.json({ success: true, message: `Server synced successfully for ${successCount} users` });
     } catch (error) { 
-        console.error("❌ Webhook Server Error:", error.message);
         res.status(500).json({ error: "Server Error" }); 
     }
 });
