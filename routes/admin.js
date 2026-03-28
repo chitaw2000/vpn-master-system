@@ -385,7 +385,7 @@ adminApp.get('/', async (req, res) => {
 });
 
 // ==========================================
-// 🌟 SETTINGS & BACKUP PAGE 🌟
+// 🌟 SETTINGS & BACKUP PAGE
 // ==========================================
 adminApp.get('/settings', async (req, res) => {
     let fullBackups = [];
@@ -487,14 +487,13 @@ adminApp.get('/settings', async (req, res) => {
                     </div>
                 </div>
             </div>
-
             ${getUploadScript()}
         </body>
         </html>
     `);
 });
 
-// 🌟 SEARCH LOGIC 🌟
+// 🌟 SEARCH API 🌟
 adminApp.post('/search', async (req, res) => {
     try {
         const query = req.body.query.trim();
@@ -513,7 +512,7 @@ adminApp.post('/search', async (req, res) => {
     }
 });
 
-// 🌟 BACKUP GENERATION LOGIC 🌟
+// 🌟 BACKUP APIs 🌟
 adminApp.post('/backup-all', async (req, res) => {
     try {
         const groups = await Group.find({});
@@ -546,7 +545,6 @@ adminApp.post('/backup-group', async (req, res) => {
     }
 });
 
-// 🌟 DOWNLOAD & DELETE BACKUP 🌟
 adminApp.get('/download-backup/:filename', (req, res) => {
     const filePath = path.join(backupDir, req.params.filename);
     if (fs.existsSync(filePath)) res.download(filePath);
@@ -562,7 +560,6 @@ adminApp.post('/delete-backup', (req, res) => {
     } catch(e) { res.redirect('/admin/settings'); }
 });
 
-// 🌟 RESTORE FROM UPLOAD API 🌟
 adminApp.post('/api/restore-upload', async (req, res) => {
     try {
         const { data, expectedGroup } = req.body;
@@ -575,7 +572,6 @@ adminApp.post('/api/restore-upload', async (req, res) => {
             if(data.masters) for (let m of data.masters) await Master.updateOne({ip: m.ip}, {$set: cleanObj(m)}, {upsert: true});
             if(data.users) for (let u of data.users) await User.updateOne({token: u.token}, {$set: cleanObj(u)}, {upsert: true});
         } else if (data.type === 'group') {
-            // Check if user is inside a specific group and uploading the wrong group backup
             if (expectedGroup && data.groupName !== expectedGroup) {
                 return res.json({success: false, error: `This backup belongs to [${data.groupName}], but you are in [${expectedGroup}].`});
             }
@@ -590,24 +586,18 @@ adminApp.post('/api/restore-upload', async (req, res) => {
     }
 });
 
-
 adminApp.post('/api/fetch-master-groups', async (req, res) => {
     try { 
         let { masterIp, masterApiKey } = req.body; 
         masterIp = masterIp.replace(/\/$/, ""); 
-        
         try {
             const response = await fetchWithRetry(masterIp + '/api/active-groups', null, { 
-                method: 'get',
-                headers: { 'x-api-key': masterApiKey }, 
-                timeout: 5000 
+                method: 'get', headers: { 'x-api-key': masterApiKey }, timeout: 5000 
             });
             if (response.data && response.data.groups) return res.json({ success: true, groups: response.data.groups }); 
         } catch (getErr) {
             const responsePost = await fetchWithRetry(masterIp + '/api/active-groups', {}, { 
-                method: 'post',
-                headers: { 'x-api-key': masterApiKey }, 
-                timeout: 5000 
+                method: 'post', headers: { 'x-api-key': masterApiKey }, timeout: 5000 
             });
             if (responsePost.data && responsePost.data.groups) return res.json({ success: true, groups: responsePost.data.groups }); 
             else throw new Error("Invalid API Response");
@@ -617,14 +607,26 @@ adminApp.post('/api/fetch-master-groups', async (req, res) => {
     }
 });
 
+adminApp.post('/add-master', async (req, res) => {
+    try { 
+        let { name, ip, apiKey } = req.body; 
+        ip = ip.replace(/\/$/, ""); 
+        await Master.create({ name, ip, apiKey }); 
+        res.redirect('/admin'); 
+    } catch (e) { res.status(500).send("Error saving Master."); }
+});
+
+adminApp.post('/delete-master', async (req, res) => { 
+    await Master.findByIdAndDelete(req.body.id); 
+    res.redirect('/admin'); 
+});
+
 adminApp.post('/create-group', async (req, res) => {
     try {
         const { groupName, masterGroupId, nsRecord, masterIp, masterApiKey, masterName } = req.body;
         if (groupName && masterGroupId && nsRecord && masterIp && masterApiKey) { 
             let cleanIp = masterIp.replace(/\/$/, ""); 
-            await Group.create({ 
-                name: groupName, masterGroupId, nsRecord, masterIp: cleanIp, masterApiKey, masterName: masterName || "1" 
-            }); 
+            await Group.create({ name: groupName, masterGroupId, nsRecord, masterIp: cleanIp, masterApiKey, masterName: masterName || "1" }); 
         }
         res.redirect('/admin');
     } catch (error) { res.status(500).send("Error creating group"); }
@@ -634,15 +636,10 @@ adminApp.post('/delete-group', async (req, res) => {
     try {
         const groupInfo = await Group.findOne({ name: req.body.groupName }); 
         const users = await User.find({ groupName: req.body.groupName });
-        
         if (groupInfo) { 
             for (const u of users) { 
                 try { 
-                    await fetchWithRetry(
-                        groupInfo.masterIp + '/api/internal/delete-user', 
-                        { username: u.name, token: u.token }, 
-                        { headers: { 'x-api-key': groupInfo.masterApiKey } }
-                    ); 
+                    await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: u.name, token: u.token }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); 
                 } catch(e) {} 
             } 
         }
@@ -653,7 +650,7 @@ adminApp.post('/delete-group', async (req, res) => {
 });
 
 // ==========================================
-// 2. INSIDE GROUP VIEW (WITH MANUAL UPLOAD & DOWNLOAD)
+// 2. INSIDE GROUP VIEW
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
@@ -673,7 +670,6 @@ adminApp.get('/group/:name', async (req, res) => {
         const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
         const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
         
-        // 🌟 Search Highlight Style 🌟
         const isHighlighted = (u.token === highlightToken) ? 'bg-yellow-100 border-l-4 border-yellow-500 animate-pulse transition-colors shadow-inner' : 'hover:bg-indigo-50/50';
 
         usersHtml += `
@@ -698,30 +694,20 @@ adminApp.get('/group/:name', async (req, res) => {
                 </div>
             </td>
             <td class="p-4 text-right flex justify-end gap-2">
-                <button id="panelBtn-${u.token}" onclick="copyLink('${webPanelLink}', 'panelBtn-${u.token}', '<i class=\\'fas fa-globe\\'></i>')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Copy Web Panel Link">
-                    <i class="fas fa-globe"></i>
-                </button>
-                <button id="btn-${u.token}" onclick="copyLink('${ssconfLink}', 'btn-${u.token}', '<i class=\\'fas fa-link\\'></i>')" class="bg-teal-50 text-teal-600 hover:bg-teal-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Copy SSCONF Link">
-                    <i class="fas fa-link"></i>
-                </button>
-                <button onclick="openEditModal('${u.token}', '${u.totalGB}', '${u.expireDate}')" class="bg-yellow-50 text-yellow-600 hover:bg-yellow-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Edit User">
-                    <i class="fas fa-edit"></i>
-                </button>
+                <button id="panelBtn-${u.token}" onclick="copyLink('${webPanelLink}', 'panelBtn-${u.token}', '<i class=\\'fas fa-globe\\'></i>')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Copy Web Panel Link"><i class="fas fa-globe"></i></button>
+                <button id="btn-${u.token}" onclick="copyLink('${ssconfLink}', 'btn-${u.token}', '<i class=\\'fas fa-link\\'></i>')" class="bg-teal-50 text-teal-600 hover:bg-teal-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Copy SSCONF Link"><i class="fas fa-link"></i></button>
+                <button onclick="openEditModal('${u.token}', '${u.totalGB}', '${u.expireDate}')" class="bg-yellow-50 text-yellow-600 hover:bg-yellow-500 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Edit User"><i class="fas fa-edit"></i></button>
                 <form action="/admin/delete-user" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာပြီလား?');" class="m-0">
                     <input type="hidden" name="token" value="${u.token}">
                     <input type="hidden" name="groupName" value="${u.groupName}">
-                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Delete User">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    <button type="submit" class="bg-red-50 text-red-500 hover:bg-red-600 hover:text-white px-3 py-2 rounded-lg text-sm font-bold transition shadow-sm" title="Delete User"><i class="fas fa-trash"></i></button>
                 </form>
             </td>
         </tr>`;
     });
 
     let relinkOptions = '<option value="" disabled selected>Select Master API to Re-link...</option>';
-    masters.forEach(m => { 
-        relinkOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`; 
-    });
+    masters.forEach(m => { relinkOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`; });
 
     res.send(`
         <!DOCTYPE html>
@@ -745,30 +731,23 @@ adminApp.get('/group/:name', async (req, res) => {
             <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8 -mt-8 sticky top-[88px] z-30 animate-fade-in-up">
                 <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
                     <div class="flex items-center">
-                        <a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl transition transform hover:-translate-x-1">
-                            <i class="fas fa-arrow-left"></i>
-                        </a>
+                        <a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl transition transform hover:-translate-x-1"><i class="fas fa-arrow-left"></i></a>
                         <span class="font-black text-2xl text-slate-800">${groupName}</span>
-                        <span class="ml-3 text-[10px] font-black text-white bg-indigo-500 px-2 py-1 rounded shadow-sm uppercase tracking-widest">
-                            ${groupInfo.masterName || 'API'}
-                        </span>
+                        <span class="ml-3 text-[10px] font-black text-white bg-indigo-500 px-2 py-1 rounded shadow-sm uppercase tracking-widest">${groupInfo.masterName || 'API'}</span>
                     </div>
                     <div class="flex flex-wrap items-center gap-3">
                         <div class="hidden md:block text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-xl border border-slate-200">
                             <i class="fas fa-link text-indigo-400 mr-1"></i> ${groupInfo.masterIp || 'Not Linked'}
                         </div>
-                        
                         <button type="button" onclick="triggerUpload('group', '${groupName}')" class="bg-slate-800 text-white hover:bg-black px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm flex items-center">
                             <i class="fas fa-upload mr-2"></i> Upload Backup
                         </button>
-                        
                         <form action="/admin/backup-group" method="POST" class="m-0">
                             <input type="hidden" name="groupName" value="${groupName}">
-                            <button type="submit" class="bg-blue-100 text-blue-700 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm border border-blue-200 flex items-center" title="Backup this specific group">
+                            <button type="submit" class="bg-blue-100 text-blue-700 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm border border-blue-200 flex items-center">
                                 <i class="fas fa-download mr-2"></i> Download Backup
                             </button>
                         </form>
-
                         <form action="/admin/sync-group-nodes" method="POST" class="m-0" onsubmit="this.querySelector('button').innerHTML='<i class=\\'fas fa-spinner fa-spin mr-2\\'></i> Syncing...';">
                             <input type="hidden" name="groupName" value="${groupName}">
                             <button type="submit" class="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 rounded-xl text-sm font-bold transition shadow-[0_4px_14px_rgba(79,70,229,0.3)] active:scale-95 flex items-center">
@@ -791,7 +770,6 @@ adminApp.get('/group/:name', async (req, res) => {
                             <button type="submit" class="bg-indigo-600 text-white rounded-2xl py-3.5 font-bold hover:bg-indigo-700 transition text-sm shadow-[0_4px_15px_rgba(79,70,229,0.3)] active:scale-[0.98]">Add User</button>
                         </form>
                     </div>
-
                     <div class="bg-gradient-to-br from-yellow-50 to-orange-50 rounded-[2rem] shadow-sm border border-yellow-200 p-8">
                         <label class="block text-lg font-black text-yellow-800 mb-4"><i class="fas fa-plug text-yellow-600 mr-2 drop-shadow"></i> Update Connection</label>
                         <form action="/admin/update-group-master" method="POST" class="flex flex-col gap-3">
@@ -807,17 +785,10 @@ adminApp.get('/group/:name', async (req, res) => {
                         <table class="w-full text-left min-w-[800px]">
                             <thead>
                                 <tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-widest text-slate-400 font-black">
-                                    <th class="p-5">ID</th>
-                                    <th class="p-5">User Info</th>
-                                    <th class="p-5">Current Node</th>
-                                    <th class="p-5">Expire Date</th>
-                                    <th class="p-5">Data Usage</th>
-                                    <th class="p-5 text-right">Actions</th>
+                                    <th class="p-5">ID</th><th class="p-5">User Info</th><th class="p-5">Current Node</th><th class="p-5">Expire Date</th><th class="p-5">Data Usage</th><th class="p-5 text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                ${usersHtml}
-                            </tbody>
+                            <tbody>${usersHtml}</tbody>
                         </table>
                     </div>
                 </div>
@@ -832,7 +803,6 @@ adminApp.get('/group/:name', async (req, res) => {
                     <form action="/admin/edit-user" method="POST" class="flex flex-col gap-5">
                         <input type="hidden" name="groupName" value="${groupName}">
                         <input type="hidden" name="oldToken" id="editOldToken">
-                        
                         <div>
                             <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Token (Link ID)</label>
                             <input type="text" name="newToken" id="editNewToken" required class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-mono text-sm text-slate-700 bg-slate-50">
@@ -858,63 +828,33 @@ adminApp.get('/group/:name', async (req, res) => {
             ${getUploadScript()}
 
             <script>
-                // 🌟 Auto scroll to highlighted user from Search 🌟
                 window.onload = () => {
                     const urlParams = new URLSearchParams(window.location.search);
                     const highlight = urlParams.get('highlight');
                     if (highlight) {
                         const el = document.getElementById('user-' + highlight);
-                        if (el) {
-                            setTimeout(() => {
-                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            }, 500);
-                        }
+                        if (el) setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 500);
                     }
                 };
 
                 function openEditModal(token, gb, expire) {
-                    document.getElementById('editOldToken').value = token;
-                    document.getElementById('editNewToken').value = token;
-                    document.getElementById('editTotalGB').value = gb;
-                    document.getElementById('editExpireDate').value = expire;
-                    
-                    const modal = document.getElementById('editModal');
-                    const content = document.getElementById('editModalContent');
-                    modal.classList.remove('hidden');
-                    modal.classList.add('flex');
-                    setTimeout(() => {
-                        modal.classList.remove('opacity-0');
-                        content.classList.remove('scale-95');
-                    }, 10);
+                    document.getElementById('editOldToken').value = token; document.getElementById('editNewToken').value = token;
+                    document.getElementById('editTotalGB').value = gb; document.getElementById('editExpireDate').value = expire;
+                    const modal = document.getElementById('editModal'); const content = document.getElementById('editModalContent');
+                    modal.classList.remove('hidden'); modal.classList.add('flex');
+                    setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
                 }
 
                 function closeEditModal() {
-                    const modal = document.getElementById('editModal');
-                    const content = document.getElementById('editModalContent');
-                    modal.classList.add('opacity-0');
-                    content.classList.add('scale-95');
-                    setTimeout(() => {
-                        modal.classList.add('hidden');
-                        modal.classList.remove('flex');
-                    }, 300);
+                    const modal = document.getElementById('editModal'); const content = document.getElementById('editModalContent');
+                    modal.classList.add('opacity-0'); content.classList.add('scale-95');
+                    setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 300);
                 }
 
                 function copyLink(link, btnId, origHtml) {
-                    var tempInput = document.createElement("input"); 
-                    tempInput.value = link; 
-                    document.body.appendChild(tempInput); 
-                    tempInput.select(); 
-                    document.execCommand("copy"); 
-                    document.body.removeChild(tempInput);
-                    
-                    var btn = document.getElementById(btnId); 
-                    btn.innerHTML = '<i class="fas fa-check"></i>'; 
-                    btn.classList.add('bg-green-500', 'text-white');
-                    
-                    setTimeout(() => { 
-                        btn.innerHTML = origHtml; 
-                        btn.classList.remove('bg-green-500', 'text-white'); 
-                    }, 2000);
+                    var tempInput = document.createElement("input"); tempInput.value = link; document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
+                    var btn = document.getElementById(btnId); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.classList.add('bg-green-500', 'text-white');
+                    setTimeout(() => { btn.innerHTML = origHtml; btn.classList.remove('bg-green-500', 'text-white'); }, 2000);
                 }
             </script>
         </body>
@@ -922,32 +862,39 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
+// 🌟 EDIT USER LOGIC (SYNC TO MASTER INSTANTLY) 🌟
 adminApp.post('/edit-user', async (req, res) => {
     try {
         const { groupName, oldToken, newToken, newTotalGB, newExpireDate } = req.body;
         
         if (oldToken !== newToken) {
             const existingToken = await User.findOne({ token: newToken });
-            if (existingToken) {
-                return res.status(400).send("Error: This Token already exists in the system.");
-            }
+            if (existingToken) return res.status(400).send("Error: This Token already exists in the system.");
         }
 
         const user = await User.findOne({ token: oldToken });
-        
         if (user) {
             user.token = newToken.trim(); 
             user.totalGB = Number(newTotalGB);
             user.expireDate = newExpireDate;
             await user.save();
             try { await redisClient.del(oldToken); } catch(e){}
+
+            // Update Master
+            try {
+                const groupInfo = await Group.findOne({ name: groupName });
+                if (groupInfo && groupInfo.masterIp) {
+                    await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
+                        username: user.name, totalGB: user.totalGB, expireDate: user.expireDate
+                    }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
+                }
+            } catch (masterErr) { console.log("⚠️ Master Server update missed."); }
         }
         res.redirect('/admin/group/' + encodeURIComponent(groupName));
-    } catch (error) {
-        res.status(500).send("Error updating user details");
-    }
+    } catch (error) { res.status(500).send("Error updating user details"); }
 });
 
+// 🌟 SYNC NODES (FORCES GB TO MASTER) 🌟
 adminApp.post('/sync-group-nodes', async (req, res) => {
     try {
         const groupName = req.body.groupName;
@@ -962,10 +909,7 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
             await Promise.all(batch.map(async (user) => {
                 try {
                     const masterResponse = await fetchWithRetry(groupInfo.masterIp + '/api/generate-keys', {
-                        masterGroupId: groupInfo.masterGroupId, 
-                        userName: user.name, 
-                        totalGB: user.totalGB, 
-                        expireDate: user.expireDate
+                        masterGroupId: groupInfo.masterGroupId, userName: user.name, totalGB: user.totalGB, expireDate: user.expireDate
                     }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 8000 });
 
                     if (masterResponse.data && masterResponse.data.keys) {
@@ -973,42 +917,30 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
                         for (const [nodeName, nodeConfig] of Object.entries(masterResponse.data.keys)) {
                             updateQuery[`accessKeys.${nodeName}`] = nodeConfig;
                         }
-
                         if (!user.currentServer || user.currentServer === "None") {
                             updateQuery["currentServer"] = Object.keys(masterResponse.data.keys)[0] || "None";
                         }
-
                         await User.updateOne({ _id: user._id }, { $set: updateQuery });
+
+                        // Force Master GB Update
+                        try {
+                            await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
+                                username: user.name, totalGB: user.totalGB, expireDate: user.expireDate
+                            }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 3000 });
+                        } catch (e) {}
                     }
-                } catch (err) {
-                    console.log(`❌ Failed to sync nodes for user: ${user.name}`);
-                }
+                } catch (err) { console.log(`❌ Failed to sync nodes for user: ${user.name}`); }
             }));
         }
         res.redirect('/admin/group/' + encodeURIComponent(groupName));
-    } catch (error) {
-        res.status(500).send("Error syncing nodes");
-    }
+    } catch (error) { res.status(500).send("Error syncing nodes"); }
 });
 
-adminApp.post('/update-group-master', async (req, res) => {
-    try {
-        const { groupName, masterData } = req.body;
-        if(masterData) { 
-            const [ip, apiKey, name] = masterData.split('|'); 
-            await Group.updateOne({ name: groupName }, { masterIp: ip, masterApiKey: apiKey, masterName: name }); 
-        }
-        res.redirect('/admin/group/' + encodeURIComponent(groupName));
-    } catch (e) { 
-        res.status(500).send("Error updating connection"); 
-    }
-});
-
+// 🌟 ADD USER LOGIC (ALPHANUMERIC 32-CHAR) 🌟
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
         const groupInfo = await Group.findOne({ name: groupName });
-        
         if(!groupInfo || !groupInfo.masterIp) return res.status(400).send("Invalid Group Setup");
 
         const lastUser = await User.findOne({ groupName: groupName }).sort({ userNo: -1 });
@@ -1019,34 +951,19 @@ adminApp.post('/add-user', async (req, res) => {
         }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
 
         if (masterResponse.data && masterResponse.data.keys) {
-            
             const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
             const allChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-            
             let token = letters.charAt(Math.floor(Math.random() * letters.length));
-            for (let i = 0; i < 31; i++) {
-                token += allChars.charAt(Math.floor(Math.random() * allChars.length));
-            }
+            for (let i = 0; i < 31; i++) { token += allChars.charAt(Math.floor(Math.random() * allChars.length)); }
             
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
             await User.create({ 
-                name, 
-                token, 
-                groupName, 
-                totalGB: Number(totalGB), 
-                usedGB: 0, 
-                currentServer: defaultServer, 
-                expireDate, 
-                accessKeys: masterResponse.data.keys, 
-                userNo: nextNo 
+                name, token, groupName, totalGB: Number(totalGB), usedGB: 0, 
+                currentServer: defaultServer, expireDate, accessKeys: masterResponse.data.keys, userNo: nextNo 
             });
             res.redirect('/admin/group/' + encodeURIComponent(groupName));
-        } else { 
-            res.status(400).send("Master Panel API Error"); 
-        }
-    } catch (error) { 
-        res.status(500).send("Error connecting to Master"); 
-    }
+        } else { res.status(400).send("Master Panel API Error"); }
+    } catch (error) { res.status(500).send("Error connecting to Master"); }
 });
 
 adminApp.post('/delete-user', async (req, res) => {
@@ -1054,43 +971,27 @@ adminApp.post('/delete-user', async (req, res) => {
         const token = req.body.token;
         const groupInfo = await Group.findOne({ name: req.body.groupName });
         const user = await User.findOne({ token: token });
-        
         if (groupInfo && user) {
-            try { 
-                await fetchWithRetry(
-                    groupInfo.masterIp + '/api/internal/delete-user', 
-                    { username: user.name, token: token },
-                    { headers: { 'x-api-key': groupInfo.masterApiKey } }
-                ); 
-            } catch(e) {}
+            try { await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: user.name, token: token }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e) {}
         }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
-    } catch (error) { 
-        res.status(500).send("Error deleting user"); 
-    }
+    } catch (error) { res.status(500).send("Error deleting user"); }
 });
 
 adminApp.post('/api/internal/sync-user-usage', async (req, res) => {
     try {
-        const { name, usedGB, totalGB, expireDate, isBlocked } = req.body;
-        
+        const { name, usedGB, totalGB, expireDate } = req.body;
         if (!name) return res.status(400).json({ error: "Missing username" });
-
         const user = await User.findOne({ name: name });
-        if (!user) {
-            return res.status(404).json({ error: "User not found locally" });
-        }
+        if (!user) return res.status(404).json({ error: "User not found locally" });
 
         if (usedGB !== undefined) user.usedGB = Number(usedGB);
         if (totalGB !== undefined) user.totalGB = Number(totalGB);
         if (expireDate !== undefined) user.expireDate = expireDate;
-        
         await user.save();
         return res.json({ success: true, message: "Usage synced successfully" });
-    } catch (error) { 
-        res.status(500).json({ error: "Server Error" }); 
-    }
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
 adminApp.post('/api/internal/sync-new-server', async (req, res) => {
@@ -1098,37 +999,22 @@ adminApp.post('/api/internal/sync-new-server', async (req, res) => {
         const apiKey = req.headers['x-api-key'];
         const { masterGroupId, newServerName, userKeys } = req.body;
 
-        if (!masterGroupId || !newServerName || !userKeys) {
-            return res.status(400).json({ error: "Invalid payload data" });
-        }
+        if (!masterGroupId || !newServerName || !userKeys) return res.status(400).json({ error: "Invalid payload data" });
 
         const validGroup = await Group.findOne({ masterGroupId: masterGroupId, masterApiKey: apiKey });
-        if (!validGroup) {
-            return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
-        }
+        if (!validGroup) return res.status(401).json({ error: "Unauthorized API Key" });
 
         let successCount = 0;
         for (const [identifier, newConfig] of Object.entries(userKeys)) {
             const escapedIdentifier = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const user = await User.findOne({ 
-                $or: [
-                    { token: identifier }, 
-                    { name: new RegExp('^' + escapedIdentifier + '$', 'i') } 
-                ] 
-            });
-
+            const user = await User.findOne({ $or: [{ token: identifier }, { name: new RegExp('^' + escapedIdentifier + '$', 'i') }] });
             if (user) {
-                await User.updateOne(
-                    { _id: user._id },
-                    { $set: { [`accessKeys.${newServerName}`]: newConfig } }
-                );
+                await User.updateOne({ _id: user._id }, { $set: { [`accessKeys.${newServerName}`]: newConfig } });
                 successCount++;
             }
         }
         return res.json({ success: true, message: `Server synced successfully for ${successCount} users` });
-    } catch (error) { 
-        res.status(500).json({ error: "Server Error" }); 
-    }
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
 module.exports = adminApp;
