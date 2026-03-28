@@ -217,7 +217,6 @@ userApp.get('/panel/:token', async (req, res) => {
                             ${nodesListHtml}
                         </div>
                     </div>
-
                 </div>
                 
                 <div id="switchModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-[#0b1121]/80 backdrop-blur-md opacity-0 transition-opacity duration-300">
@@ -391,6 +390,14 @@ userApp.post('/panel/change-server', async (req, res) => {
         
         if (!user) return res.status(404).send("User not found");
         
+        // 🌟 Prevent Changing Server if Expired
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); 
+        const expDate = new Date(user.expireDate);
+        if (user.usedGB >= user.totalGB || today > expDate) {
+            return res.status(403).send("Account Expired. You cannot change server.");
+        }
+        
         const groupInfo = await Group.findOne({ name: user.groupName });
         if (!groupInfo) return res.status(404).send("Group Error");
 
@@ -433,7 +440,7 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // ==========================================
-// 4. OUTLINE SUBSCRIPTION API (WITH 401 JSON ERROR RESPONSE)
+// 4. OUTLINE SUBSCRIPTION API (WITH 400 JSON ERROR RESPONSE)
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
     try {
@@ -448,16 +455,16 @@ userApp.get('/:token.json', async (req, res) => {
         const expDate = new Date(user.expireDate);
         const isExpired = user.usedGB >= user.totalGB || today > expDate;
 
-        // 🌟🌟 FIXED: Outline Native JSON Error (Status 401) 🌟🌟
+        // 🌟🌟 FIXED: Outline Native JSON Error (Status 400 with proper Header) 🌟🌟
         if (isExpired) {
             const errorJson = {
                 "error": {
-                    "message": "⛔️ ဝယ်ယူထားသော Package မှာကုန်ဆုံးသွားပြီဖြစ်ပါတယ်။ Admin ထံ ဆက်သွယ်ပြီး Package အသစ်ဝယ်ယူနိုင်ပါတယ်။ / Your package has been used up, contact Admin to renew.",
+                    "message": "⛔️ ဝယ်ယူထားသော Package မှာကုန်ဆုံးသွားပြီဖြစ်ပါတယ်။ Admin ထံ ဆက်သွယ်ပြီး Package အသစ်ဝယ်ယူနိုင်ပါတယ်။",
                     "details": "Package ဝယ်ယူရန် http://t.me/qitoadmin သို့မဟုတ် http://m.me/qitotechmm ကိုဆက်သွယ်နိုင်ပါတယ်။\n\nQITO Tech Premium VPN မှ အကောင်းဆုံး ဝန်ဆောင်မှုများ ဆက်လက်ပေးရန် အဆင်သင့်ရှိနေပါသည်။"
                 }
             };
             
-            // Webhook to ensure master blocks the key
+            // Webhook to block user on Master server (Fire & Forget)
             try {
                 const groupInfo = await Group.findOne({ name: user.groupName });
                 if (groupInfo && groupInfo.masterIp) {
@@ -468,8 +475,9 @@ userApp.get('/:token.json', async (req, res) => {
                 }
             } catch (e) {}
 
-            // 🌟 Return 401 Unauthorized so Outline natively parses the Error JSON
-            return res.status(401).json(errorJson); 
+            // 🌟 အစ်ကိုရှာလာတဲ့ Code အတိုင်း Content-Type နဲ့ 400 Status Code ကို တိတိကျကျ ပေးပို့ခြင်း 🌟
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            return res.status(400).send(JSON.stringify(errorJson)); 
         }
 
         // --- Expired မဖြစ်ပါက ပုံမှန်အတိုင်း Key ပေးမည် ---
