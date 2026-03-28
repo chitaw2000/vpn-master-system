@@ -43,7 +43,7 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
 });
 
 // ==========================================
-// 2. USER WEB PANEL (PREMIUM UI)
+// 2. USER WEB PANEL (PREMIUM UI WITH GLOWING DIAMOND)
 // ==========================================
 userApp.get('/panel/:token', async (req, res) => {
     try {
@@ -55,10 +55,8 @@ userApp.get('/panel/:token', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
 
-        // 🌟 Links Construction (FIXED: Hiddify strictly uses ssconf:// now)
         const encodedName = encodeURIComponent(user.name.replace(/\s+/g, ''));
         const ssconfLink = `ssconf://${domainName}/${token}.json#QitoVPN_${encodedName}`; 
-        const hiddifyDeepLink = `hiddify://import/${ssconfLink}`; 
 
         let nodesListHtml = '';
         let nodeNames = []; 
@@ -103,7 +101,6 @@ userApp.get('/panel/:token', async (req, res) => {
         const usagePercent = user.totalGB > 0 ? ((user.usedGB / user.totalGB) * 100).toFixed(1) : 0;
         const logoUrl = "https://i.postimg.cc/G2FPpD7C/QUITO-profile-1.png"; 
         const outlineIconUrl = "https://i.postimg.cc/rm7q3wKz/images-(23).jpg";
-        const hiddifyIconUrl = "https://i.postimg.cc/kXQ7Y99g/images-(6).png";
 
         res.send(`
             <!DOCTYPE html>
@@ -129,9 +126,10 @@ userApp.get('/panel/:token', async (req, res) => {
                                 <p class="text-xs font-black text-indigo-400 tracking-widest uppercase">Premium VPN</p>
                             </div>
                         </div>
-                        <div class="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 shadow-sm flex items-center gap-1.5">
-                            <i class="fas fa-crown text-yellow-500 text-[10px]"></i>
-                            <span class="text-[10px] font-bold text-slate-300 uppercase">VIP</span>
+                        
+                        <div class="bg-slate-800/90 px-3 py-1.5 rounded-xl border border-cyan-500/30 shadow-[0_0_15px_rgba(34,211,238,0.25)] flex items-center gap-2">
+                            <i class="fas fa-gem text-cyan-400 text-[13px] animate-spin" style="animation-duration: 3s; filter: drop-shadow(0 0 6px #22d3ee);"></i>
+                            <span class="text-[11px] font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-400 uppercase tracking-widest">Premium</span>
                         </div>
                     </div>
 
@@ -156,14 +154,10 @@ userApp.get('/panel/:token', async (req, res) => {
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-3 mb-3">
-                        <a href="${ssconfLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3.5 px-2 rounded-2xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md">
-                            <img src="${outlineIconUrl}" class="w-5 h-5 rounded object-cover shadow-sm">
-                            <span class="tracking-wide">Outline</span>
-                        </a>
-                        <a href="${hiddifyDeepLink}" class="bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-3.5 px-2 rounded-2xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md">
-                            <img src="${hiddifyIconUrl}" class="w-5 h-5 rounded object-cover shadow-sm">
-                            <span class="tracking-wide">Hiddify</span>
+                    <div class="mb-3">
+                        <a href="${ssconfLink}" class="w-full bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-4 px-2 rounded-2xl flex items-center justify-center gap-3 transition active:scale-[0.98] shadow-md">
+                            <img src="${outlineIconUrl}" class="w-6 h-6 rounded object-cover shadow-sm">
+                            <span class="tracking-wide text-[15px]">Connect with Outline</span>
                         </a>
                     </div>
 
@@ -350,7 +344,7 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // ==========================================
-// 4. OUTLINE SUBSCRIPTION API (PURE JSON)
+// 4. OUTLINE SUBSCRIPTION API (PURE JSON - PREFIX REMOVED)
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
     try {
@@ -372,7 +366,7 @@ userApp.get('/:token.json', async (req, res) => {
                 return res.json({ server: rawConfig }); 
             }
 
-            // 🌟 PURE JSON ကိုသာ ပြန်ပေးမည် (Outline နှင့် Hiddify ၏ ssconf:// မှ Native ဖတ်နိုင်ရန်)
+            // 🌟 Pure JSON Format (Prefix Removed)
             if (typeof rawConfig === 'object' && rawConfig.server) { 
                 rawConfig = { 
                     server: rawConfig.server, 
