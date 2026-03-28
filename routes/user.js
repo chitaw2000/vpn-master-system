@@ -55,7 +55,7 @@ userApp.get('/panel/:token', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
 
-        // 🌟 Expired or GB Full Check 🌟
+        // 🌟 Expired Check 🌟
         const today = new Date();
         today.setHours(0, 0, 0, 0); 
         const expDate = new Date(user.expireDate);
@@ -390,7 +390,6 @@ userApp.post('/panel/change-server', async (req, res) => {
         
         if (!user) return res.status(404).send("User not found");
         
-        // 🌟 Prevent Changing Server if Expired
         const today = new Date();
         today.setHours(0, 0, 0, 0); 
         const expDate = new Date(user.expireDate);
@@ -440,7 +439,7 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // ==========================================
-// 4. OUTLINE SUBSCRIPTION API (WITH 400 JSON ERROR RESPONSE)
+// 4. OUTLINE SUBSCRIPTION API (WITH PERFECT JSON ERROR)
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
     try {
@@ -455,7 +454,7 @@ userApp.get('/:token.json', async (req, res) => {
         const expDate = new Date(user.expireDate);
         const isExpired = user.usedGB >= user.totalGB || today > expDate;
 
-        // 🌟🌟 FIXED: Outline Native JSON Error (Status 400 with proper Header) 🌟🌟
+        // 🌟🌟 FIXED: Outline Native JSON Error (200 OK + specific JSON structure) 🌟🌟
         if (isExpired) {
             const errorJson = {
                 "error": {
@@ -464,7 +463,6 @@ userApp.get('/:token.json', async (req, res) => {
                 }
             };
             
-            // Webhook to block user on Master server (Fire & Forget)
             try {
                 const groupInfo = await Group.findOne({ name: user.groupName });
                 if (groupInfo && groupInfo.masterIp) {
@@ -475,9 +473,10 @@ userApp.get('/:token.json', async (req, res) => {
                 }
             } catch (e) {}
 
-            // 🌟 အစ်ကိုရှာလာတဲ့ Code အတိုင်း Content-Type နဲ့ 400 Status Code ကို တိတိကျကျ ပေးပို့ခြင်း 🌟
+            // 🌟 Set specific headers and status as requested 🌟
+            res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
-            return res.status(400).send(JSON.stringify(errorJson)); 
+            return res.status(200).send(JSON.stringify(errorJson)); 
         }
 
         // --- Expired မဖြစ်ပါက ပုံမှန်အတိုင်း Key ပေးမည် ---
