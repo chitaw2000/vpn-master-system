@@ -525,7 +525,7 @@ adminApp.post('/update-group-master', async (req, res) => {
     }
 });
 
-// 🌟 ADD USER LOGIC (FIXED TOKEN LENGTH FOR HIDDIFY)
+// 🌟 ADD USER LOGIC (FIXED: EXACTLY 32 CHARACTERS FOR HIDDIFY)
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
@@ -542,11 +542,18 @@ adminApp.post('/add-user', async (req, res) => {
 
         if (masterResponse.data && masterResponse.data.keys) {
             
-            // 🌟🌟 FIX: Token starts with random UPPERCASE letter + 24 random hex characters 🌟🌟
+            // 🌟🌟 THE ULTIMATE FIX: EXACTLY 32 CHARACTERS (1 Letter + 31 Hex Digits) 🌟🌟
+            // Hiddify strictly validates UUID length (32 chars without hyphens).
+            
+            // 1. Generate a random UPPERCASE letter (A-Z)
             const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26)); 
             
-            // crypto.randomBytes(12) gives 24 hex characters. Total length = 25 characters
-            const token = randomLetter + crypto.randomBytes(12).toString('hex'); 
+            // 2. Generate 16 bytes of random hex (which is exactly 32 characters long)
+            const randomHex = crypto.randomBytes(16).toString('hex'); 
+            
+            // 3. Combine them: We take the 1 uppercase letter, and attach the LAST 31 characters of the hex string.
+            // Result: Exactly 32 characters total. Always starts with a letter.
+            const token = randomLetter + randomHex.substring(1); 
             
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
             await User.create({ 
