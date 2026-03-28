@@ -525,7 +525,7 @@ adminApp.post('/update-group-master', async (req, res) => {
     }
 });
 
-// 🌟 ADD USER LOGIC (THE ULTIMATE HIDDIFY UUID FIX)
+// 🌟 ADD USER LOGIC (THE ULTIMATE ALPHANUMERIC 32-CHAR FIX)
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
@@ -542,22 +542,21 @@ adminApp.post('/add-user', async (req, res) => {
 
         if (masterResponse.data && masterResponse.data.keys) {
             
-            // 🌟🌟 THE ULTIMATE HIDDIFY FIX: EXACTLY 32 HEX CHARACTERS 🌟🌟
-            // Hiddify strictly validates UUID format (Hexadecimal characters only). 
-            // 'g' through 'z' are completely INVALID in hex.
+            // 🌟🌟 ALPHANUMERIC GENERATOR: Exactly 32 characters, matching the working example! 🌟🌟
+            // Example of working token: e61cSmJe8w3vcNpyUn4EzEx6cMLAfddk
             
-            // 1. Choose a valid hex letter (a-f) for the first character
-            const hexLetters = 'abcdef';
-            const firstChar = hexLetters[Math.floor(Math.random() * 6)];
+            // 1. Letters for the first character (to be safe with URL parsers)
+            const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+            // 2. Full Alphanumeric set for the rest of the token
+            const allChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
             
-            // 2. Choose a valid hex letter (a-f) for the last character (matching user's observation)
-            const lastChar = hexLetters[Math.floor(Math.random() * 6)];
+            // Starts with a letter
+            let token = letters.charAt(Math.floor(Math.random() * letters.length));
             
-            // 3. Generate exactly 30 characters of random hex in the middle (15 bytes = 30 hex chars)
-            const middleChars = crypto.randomBytes(15).toString('hex'); 
-            
-            // 4. Final Token: 1 + 30 + 1 = 32 characters exactly. All valid hex format.
-            const token = firstChar + middleChars + lastChar; 
+            // Add exactly 31 more random alphanumeric characters (Total = 32)
+            for (let i = 0; i < 31; i++) {
+                token += allChars.charAt(Math.floor(Math.random() * allChars.length));
+            }
             
             const defaultServer = Object.keys(masterResponse.data.keys)[0] || "None";
             await User.create({ 
