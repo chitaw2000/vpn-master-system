@@ -43,7 +43,7 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
 });
 
 // ==========================================
-// 2. USER WEB PANEL (PREMIUM UI WITH GLOWING DIAMOND)
+// 2. USER WEB PANEL (PREMIUM UI)
 // ==========================================
 userApp.get('/panel/:token', async (req, res) => {
     try {
@@ -134,7 +134,11 @@ userApp.get('/panel/:token', async (req, res) => {
                     </div>
 
                     <div class="mb-5 ml-1">
-                        <p class="text-sm font-bold text-slate-400">Username: <span class="text-white text-base tracking-wide">${user.name}</span></p>
+                        <p class="text-sm font-bold text-slate-400">Username: 
+                            <span class="text-[22px] font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-200 via-yellow-400 to-amber-500 drop-shadow-[0_0_12px_rgba(250,204,21,0.6)] tracking-wide ml-1 uppercase">
+                                ${user.name}
+                            </span>
+                        </p>
                     </div>
 
                     <div class="bg-[#151f32] rounded-3xl p-6 shadow-xl border border-slate-800 mb-6 relative overflow-hidden">
@@ -197,10 +201,58 @@ userApp.get('/panel/:token', async (req, res) => {
                     </div>
                 </div>
 
+                <div id="successModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-[#0b1121]/80 backdrop-blur-md opacity-0 transition-opacity duration-300">
+                    <div class="bg-[#151f32] border border-green-500/40 rounded-[2rem] p-8 w-[85%] max-w-sm shadow-[0_0_40px_rgba(34,197,94,0.25)] transform scale-95 transition-transform duration-300 relative overflow-hidden" id="successModalContent">
+                        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-green-500/20 rounded-full blur-3xl -mt-10"></div>
+                        <div class="text-center relative z-10">
+                            <div class="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-5 border border-green-500/30 shadow-[0_0_20px_rgba(34,197,94,0.2)]">
+                                <i class="fas fa-check text-green-400 text-4xl"></i>
+                            </div>
+                            <h3 class="text-xl font-black text-white mb-3 tracking-tight">Server Changed!</h3>
+                            <div class="bg-green-900/30 border border-green-500/30 rounded-xl p-4 mb-6">
+                                <p class="text-green-400 font-bold text-[14px] leading-relaxed">
+                                    ကျေးဇူးပြု၍ Outline App ထဲတွင် Key အား ဖြုတ်ပြီး ပြန်ချိတ်ပေးပါ။
+                                </p>
+                            </div>
+                            <button onclick="closeSuccessModal()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(34,197,94,0.4)] active:scale-[0.98]">OK, Got it!</button>
+                        </div>
+                    </div>
+                </div>
+
                 <script>
                     const nodes = ${JSON.stringify(nodeNames)};
                     const token = '${token}';
                     let currentFormId = '';
+
+                    // 🌟 Auto-show Success Modal if switched=true in URL 🌟
+                    window.onload = function() {
+                        const urlParams = new URLSearchParams(window.location.search);
+                        if (urlParams.get('switched') === 'true') {
+                            const successModal = document.getElementById('successModal');
+                            const successContent = document.getElementById('successModalContent');
+                            successModal.classList.remove('hidden');
+                            successModal.classList.add('flex');
+                            
+                            setTimeout(() => {
+                                successModal.classList.remove('opacity-0');
+                                successContent.classList.remove('scale-95');
+                            }, 10);
+                            
+                            // Clean up URL to prevent showing again on normal reload
+                            window.history.replaceState({}, document.title, window.location.pathname);
+                        }
+                    };
+
+                    function closeSuccessModal() {
+                        const successModal = document.getElementById('successModal');
+                        const successContent = document.getElementById('successModalContent');
+                        successModal.classList.add('opacity-0');
+                        successContent.classList.add('scale-95');
+                        setTimeout(() => {
+                            successModal.classList.add('hidden');
+                            successModal.classList.remove('flex');
+                        }, 300);
+                    }
 
                     function confirmSwitch(formId, serverName) {
                         currentFormId = formId;
@@ -337,14 +389,15 @@ userApp.post('/panel/change-server', async (req, res) => {
             ); 
         } catch (err) {}
         
-        res.redirect('/panel/' + token);
+        // 🌟 Redirect with "switched=true" flag to trigger success modal 🌟
+        res.redirect('/panel/' + token + '?switched=true');
     } catch (error) { 
         res.status(500).send("Error Changing Server"); 
     }
 });
 
 // ==========================================
-// 4. OUTLINE SUBSCRIPTION API (PURE JSON - PREFIX REMOVED)
+// 4. OUTLINE SUBSCRIPTION API (PURE JSON)
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
     try {
@@ -366,7 +419,6 @@ userApp.get('/:token.json', async (req, res) => {
                 return res.json({ server: rawConfig }); 
             }
 
-            // 🌟 Pure JSON Format (Prefix Removed)
             if (typeof rawConfig === 'object' && rawConfig.server) { 
                 rawConfig = { 
                     server: rawConfig.server, 
