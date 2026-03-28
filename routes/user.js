@@ -43,7 +43,7 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
 });
 
 // ==========================================
-// 2. USER WEB PANEL (PREMIUM UI)
+// 2. USER WEB PANEL (PREMIUM UI WITH EXPIRE ALERT)
 // ==========================================
 userApp.get('/panel/:token', async (req, res) => {
     try {
@@ -54,6 +54,12 @@ userApp.get('/panel/:token', async (req, res) => {
 
         const group = await Group.findOne({ name: user.groupName });
         const domainName = (group && group.nsRecord) ? group.nsRecord : req.hostname;
+
+        // 🌟 Expired or GB Full Check 🌟
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); 
+        const expDate = new Date(user.expireDate);
+        const isExpired = user.usedGB >= user.totalGB || today > expDate;
 
         const encodedName = encodeURIComponent(user.name.replace(/\s+/g, ''));
         const ssconfLink = `ssconf://${domainName}/${token}.json#QitoVPN_${encodedName}`; 
@@ -99,8 +105,64 @@ userApp.get('/panel/:token', async (req, res) => {
         }
 
         const usagePercent = user.totalGB > 0 ? ((user.usedGB / user.totalGB) * 100).toFixed(1) : 0;
+        const isGbFull = user.usedGB >= user.totalGB;
+        // အကယ်၍ GB ပြည့်နေပါက အနီရောင်ဖြင့် ပြမည်
+        const progressColor = isGbFull ? 'from-red-600 to-red-500 shadow-[0_0_15px_rgba(239,68,68,0.6)]' : 'from-indigo-600 via-indigo-500 to-purple-500 shadow-[0_0_15px_rgba(99,102,241,0.6)]';
+
         const logoUrl = "https://i.postimg.cc/G2FPpD7C/QUITO-profile-1.png"; 
         const outlineIconUrl = "https://i.postimg.cc/rm7q3wKz/images-(23).jpg";
+
+        // 🌟 Panel အောက်ပိုင်း (Expired ဖြစ်လျှင် Alert ပြမည်၊ မဖြစ်လျှင် Server များကို ပြမည်) 🌟
+        let lowerSectionHtml = '';
+
+        if (isExpired) {
+            lowerSectionHtml = `
+                <div class="bg-red-500/10 border border-red-500/50 rounded-3xl p-6 mb-6 text-center shadow-[0_0_30px_rgba(239,68,68,0.15)] relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-red-500/20 rounded-full blur-3xl -mr-10 -mt-10"></div>
+                    <div class="relative z-10">
+                        <div class="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.3)]">
+                            <i class="fas fa-ban text-red-400 text-3xl animate-pulse"></i>
+                        </div>
+                        <h3 class="text-xl font-black text-white mb-2 tracking-tight">Package ကုန်ဆုံးသွားပါပြီ</h3>
+                        <p class="text-red-300 text-[13px] font-bold mb-6 leading-relaxed px-2">
+                            သင်၏ Data ပမာဏ (သို့) သက်တမ်း ကုန်ဆုံးသွားပါသည်။ ကျေးဇူးပြု၍ Admin ထံ ဆက်သွယ်ပြီး သက်တမ်းတိုးပါ။
+                        </p>
+                        <div class="flex gap-3 justify-center">
+                            <a href="http://m.me/qitotechmm" target="_blank" class="flex-1 bg-[#0084FF] hover:bg-[#0073e6] text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(0,132,255,0.4)] active:scale-[0.98] flex items-center justify-center gap-2">
+                                <i class="fab fa-facebook-messenger text-lg"></i> Messenger
+                            </a>
+                            <a href="http://t.me/qitoadmin" target="_blank" class="flex-1 bg-[#0088cc] hover:bg-[#007ab8] text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(0,136,204,0.4)] active:scale-[0.98] flex items-center justify-center gap-2">
+                                <i class="fab fa-telegram-plane text-lg"></i> Telegram
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            lowerSectionHtml = `
+                <div class="mb-3">
+                    <a href="${ssconfLink}" class="w-full bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-4 px-2 rounded-2xl flex items-center justify-center gap-3 transition active:scale-[0.98] shadow-md">
+                        <img src="${outlineIconUrl}" class="w-6 h-6 rounded object-cover shadow-sm">
+                        <span class="tracking-wide text-[15px]">Connect with Outline</span>
+                    </a>
+                </div>
+
+                <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-[0_6px_20px_rgba(79,70,229,0.35)] mb-8 transition-all active:scale-[0.98] flex justify-center items-center gap-2.5 uppercase tracking-wider text-sm">
+                    <i class="fas fa-copy text-lg"></i> Copy Subscription Link
+                </button>
+
+                <h3 class="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 ml-2">Available Servers</h3>
+                
+                <div class="bg-[#151f32] rounded-3xl overflow-hidden shadow-xl border border-slate-800">
+                    <div class="bg-slate-800/30 p-4 text-[13px] font-bold text-slate-300 border-b border-slate-800 flex items-center gap-2">
+                        <i class="fas fa-network-wired text-indigo-500"></i> Node Group: ${user.groupName}
+                    </div>
+                    <div class="flex flex-col">
+                        ${nodesListHtml}
+                    </div>
+                </div>
+            `;
+        }
 
         res.send(`
             <!DOCTYPE html>
@@ -150,35 +212,16 @@ userApp.get('/panel/:token', async (req, res) => {
                             </div>
                         </div>
                         <div class="w-full bg-slate-800 rounded-full h-3 mt-4 relative z-10 overflow-hidden shadow-inner">
-                            <div class="bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-500 h-3 rounded-full shadow-[0_0_15px_rgba(99,102,241,0.6)]" style="width: ${usagePercent}%"></div>
+                            <div class="bg-gradient-to-r ${progressColor} h-3 rounded-full" style="width: ${usagePercent}%"></div>
                         </div>
                         <div class="mt-5 pt-5 border-t border-slate-800 flex justify-between items-center relative z-10">
                             <span class="text-[13px] font-bold text-slate-500"><i class="far fa-calendar-alt mr-1.5 text-slate-600"></i> Expires On</span>
-                            <span class="text-[13px] font-black text-yellow-500">${user.expireDate}</span>
+                            <span class="text-[13px] font-black ${isExpired ? 'text-red-500' : 'text-yellow-500'}">${user.expireDate}</span>
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <a href="${ssconfLink}" class="w-full bg-[#151f32] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold py-4 px-2 rounded-2xl flex items-center justify-center gap-3 transition active:scale-[0.98] shadow-md">
-                            <img src="${outlineIconUrl}" class="w-6 h-6 rounded object-cover shadow-sm">
-                            <span class="tracking-wide text-[15px]">Connect with Outline</span>
-                        </a>
-                    </div>
+                    ${lowerSectionHtml}
 
-                    <button id="copyBtn" onclick="copyLink('${ssconfLink}')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl shadow-[0_6px_20px_rgba(79,70,229,0.35)] mb-8 transition-all active:scale-[0.98] flex justify-center items-center gap-2.5 uppercase tracking-wider text-sm">
-                        <i class="fas fa-copy text-lg"></i> Copy Subscription Link
-                    </button>
-
-                    <h3 class="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 ml-2">Available Servers</h3>
-                    
-                    <div class="bg-[#151f32] rounded-3xl overflow-hidden shadow-xl border border-slate-800">
-                        <div class="bg-slate-800/30 p-4 text-[13px] font-bold text-slate-300 border-b border-slate-800 flex items-center gap-2">
-                            <i class="fas fa-network-wired text-indigo-500"></i> Node Group: ${user.groupName}
-                        </div>
-                        <div class="flex flex-col">
-                            ${nodesListHtml}
-                        </div>
-                    </div>
                 </div>
                 
                 <div id="switchModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-[#0b1121]/80 backdrop-blur-md opacity-0 transition-opacity duration-300">
@@ -224,7 +267,6 @@ userApp.get('/panel/:token', async (req, res) => {
                     const token = '${token}';
                     let currentFormId = '';
 
-                    // 🌟 Auto-show Success Modal if switched=true in URL 🌟
                     window.onload = function() {
                         const urlParams = new URLSearchParams(window.location.search);
                         if (urlParams.get('switched') === 'true') {
@@ -232,13 +274,10 @@ userApp.get('/panel/:token', async (req, res) => {
                             const successContent = document.getElementById('successModalContent');
                             successModal.classList.remove('hidden');
                             successModal.classList.add('flex');
-                            
                             setTimeout(() => {
                                 successModal.classList.remove('opacity-0');
                                 successContent.classList.remove('scale-95');
                             }, 10);
-                            
-                            // Clean up URL to prevent showing again on normal reload
                             window.history.replaceState({}, document.title, window.location.pathname);
                         }
                     };
@@ -286,6 +325,7 @@ userApp.get('/panel/:token', async (req, res) => {
                     });
 
                     async function fetchPings() {
+                        if (nodes.length === 0) return;
                         for(let node of nodes) {
                             try {
                                 let res = await fetch('/panel/api/ping/' + token + '/' + encodeURIComponent(node));
@@ -293,16 +333,17 @@ userApp.get('/panel/:token', async (req, res) => {
                                 let safeNodeId = node.replace(/\\s+/g, '-');
                                 let pingEl = document.getElementById('ping-' + safeNodeId);
 
-                                if(data.status === 'online' && data.latency_ms) {
+                                if(pingEl && data.status === 'online' && data.latency_ms) {
                                     let latency = Math.round(data.latency_ms);
                                     let color = latency < 100 ? 'text-green-400' : (latency < 200 ? 'text-yellow-400' : 'text-red-400');
                                     pingEl.innerHTML = \`<span class="\${color} font-bold drop-shadow-[0_0_5px_rgba(0,0,0,0.5)]"><i class="fas fa-signal text-[10px] mr-1"></i>\${latency} ms</span>\`;
-                                } else {
+                                } else if (pingEl) {
                                     pingEl.innerHTML = '<span class="text-slate-600 font-bold text-[11px] uppercase">Offline</span>';
                                 }
                             } catch(e) {
                                 let safeNodeId = node.replace(/\\s+/g, '-');
-                                document.getElementById('ping-' + safeNodeId).innerHTML = '<span class="text-slate-700 text-[11px]">Error</span>';
+                                let pingEl = document.getElementById('ping-' + safeNodeId);
+                                if (pingEl) pingEl.innerHTML = '<span class="text-slate-700 text-[11px]">Error</span>';
                             }
                         }
                     }
@@ -354,6 +395,14 @@ userApp.post('/panel/change-server', async (req, res) => {
         
         if (!user) return res.status(404).send("User not found");
         
+        // 🌟 Prevent Changing Server if Expired
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); 
+        const expDate = new Date(user.expireDate);
+        if (user.usedGB >= user.totalGB || today > expDate) {
+            return res.status(403).send("Account Expired. You cannot change server.");
+        }
+        
         const groupInfo = await Group.findOne({ name: user.groupName });
         if (!groupInfo) return res.status(404).send("Group Error");
 
@@ -389,7 +438,6 @@ userApp.post('/panel/change-server', async (req, res) => {
             ); 
         } catch (err) {}
         
-        // 🌟 Redirect with "switched=true" flag to trigger success modal 🌟
         res.redirect('/panel/' + token + '?switched=true');
     } catch (error) { 
         res.status(500).send("Error Changing Server"); 
@@ -397,19 +445,51 @@ userApp.post('/panel/change-server', async (req, res) => {
 });
 
 // ==========================================
-// 4. OUTLINE SUBSCRIPTION API (PURE JSON)
+// 4. OUTLINE SUBSCRIPTION API (WITH JSON ERROR RESPONSE)
 // ==========================================
 userApp.get('/:token.json', async (req, res) => {
     try {
         const token = req.params.token;
         
+        const user = await User.findOne({ token: token });
+        if (!user) return res.status(404).json({ error: "Configuration Not Found" });
+
+        // 🌟 Expired Check 🌟
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); 
+        const expDate = new Date(user.expireDate);
+        const isExpired = user.usedGB >= user.totalGB || today > expDate;
+
+        // အကယ်၍ Expired ဖြစ်ပါက (သို့) GB ပြည့်ပါက Outline တွင် Error Message တန်းပေါ်စေမည်
+        if (isExpired) {
+            const errorJson = {
+                "error": {
+                    "message": "⛔️ ဝယ်ယူထားသော Package မှာကုန်ဆုံးသွားပြီဖြစ်ပါတယ်။ Admin ထံ ဆက်သွယ်ပြီး Package အသစ်ဝယ်ယူနိုင်ပါတယ်။ / Your package has been used up, contact Admin to renew.",
+                    "details": "Package ဝယ်ယူရန် http://t.me/qitoadmin သို့မဟုတ် http://m.me/qitotechmm ကိုဆက်သွယ်နိုင်ပါတယ်။\n\nQITO Tech Premium VPN မှ အကောင်းဆုံး ဝန်ဆောင်မှုများ ဆက်လက်ပေးရန် အဆင်သင့်ရှိနေပါသည်။"
+                }
+            };
+            
+            // Call Webhook to ensure master blocks the key (Fire and Forget)
+            try {
+                const groupInfo = await Group.findOne({ name: user.groupName });
+                if (groupInfo && groupInfo.masterIp) {
+                    axios.post(groupInfo.masterIp + '/api/internal/block-user', 
+                        { username: user.name }, 
+                        { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 2000 }
+                    ).catch(() => {});
+                }
+            } catch (e) {}
+
+            return res.status(400).json(errorJson);
+        }
+
+        // --- Expired မဖြစ်ပါက ပုံမှန်အတိုင်း Key ပေးမည် ---
         const cachedKey = await redisClient.get(token);
         if (cachedKey) { 
             try { return res.json(JSON.parse(cachedKey)); } catch (e) { await redisClient.del(token); } 
         }
-        
-        const user = await User.findOne({ token: token });
-        if (user && user.accessKeys && user.accessKeys[user.currentServer]) {
+
+        if (user.accessKeys && user.accessKeys[user.currentServer]) {
             let rawConfig = user.accessKeys[user.currentServer];
             
             if (typeof rawConfig === 'string' && rawConfig.startsWith('{')) { 
