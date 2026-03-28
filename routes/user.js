@@ -135,8 +135,14 @@ userApp.post('/panel/change-server', async (req, res) => {
                 }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
                 
                 if (masterResponse.data && masterResponse.data.keys) { 
-                    user.accessKeys = masterResponse.data.keys; 
-                    user.markModified('accessKeys'); 
+                    
+                    // 🌟 Merge & Force Database Update 🌟
+                    const mergedKeys = { ...(user.accessKeys || {}), ...masterResponse.data.keys };
+                    
+                    await User.updateOne(
+                        { _id: user._id },
+                        { $set: { accessKeys: mergedKeys } }
+                    );
                 }
             } catch (err) { 
                 console.log("Key Sync Error"); 
@@ -205,7 +211,7 @@ userApp.get('/:token.json', async (req, res) => {
     }
 });
 
-// 🌟🌟 NEW: Server ပြောင်းသွားသည့်အချိန် Master က Auto Push လာမည့် Webhook (Root API Route)
+// 🌟🌟 NEW: FORCE UPDATE FOR AUTO SYNC WEBHOOK (Root API Route) 🌟🌟
 userApp.post('/api/internal/sync-new-server', async (req, res) => {
     try {
         const apiKey = req.headers['x-api-key'];
@@ -220,15 +226,18 @@ userApp.post('/api/internal/sync-new-server', async (req, res) => {
             return res.status(401).json({ error: "Unauthorized API Key or Group Not Found" });
         }
 
-        // Token တစ်ခုချင်းစီအတွက် Key အသစ်များကို Database ထဲသို့ ထည့်ပေးခြင်း
-        for (const [token, newConfig] of Object.entries(userKeys)) {
-            const user = await User.findOne({ token: token });
+        for (const [identifier, newConfig] of Object.entries(userKeys)) {
+            const user = await User.findOne({ $or: [{ token: identifier }, { name: identifier }] });
             if (user) {
-                if (!user.accessKeys) user.accessKeys = {};
                 
-                user.accessKeys[newServerName] = newConfig;
-                user.markModified('accessKeys'); // Database ကို အသိပေးခြင်း
-                await user.save();
+                // 🌟 Force Update to bypass Database ignore issue 🌟
+                const updatedKeys = { ...(user.accessKeys || {}) };
+                updatedKeys[newServerName] = newConfig;
+                
+                await User.updateOne(
+                    { _id: user._id },
+                    { $set: { accessKeys: updatedKeys } }
+                );
             }
         }
         return res.json({ success: true, message: "Server synced successfully" });
