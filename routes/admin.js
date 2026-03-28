@@ -1,18 +1,17 @@
-cat << 'EOF' > routes/admin.js
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
 const adminApp = express.Router();
 const Group = require('../models/Group');
 const User = require('../models/User');
-const Master = require('../models/Master'); // 🌟 Master DB အသစ်
+const Master = require('../models/Master');
 
 // ==========================================
 // 1. HOME DASHBOARD
 // ==========================================
 adminApp.get('/', async (req, res) => {
     const groups = await Group.find({});
-    const masters = await Master.find({}); // 🌟 မှတ်ထားသော Master များကို ယူမည်
+    const masters = await Master.find({}); 
     
     let groupsHtml = '';
     for (const g of groups) {
@@ -51,10 +50,9 @@ adminApp.get('/', async (req, res) => {
         </div>`;
     }
 
-    // Master API များအတွက် Dropdown နှင့် ဇယား ဖန်တီးခြင်း
     let masterOptions = '<option value="" disabled selected>Select a saved Master API...</option>';
     let mastersListHtml = '';
-    masters.forEach((m, i) => {
+    masters.forEach((m) => {
         masterOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`;
         mastersListHtml += `
             <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-2">
@@ -76,7 +74,6 @@ adminApp.get('/', async (req, res) => {
                 </div>
             </nav>
             <div class="max-w-7xl mx-auto px-4">
-                
                 <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-8 flex flex-col md:flex-row gap-6">
                     <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
                         <label class="block text-lg font-black text-slate-800 mb-4"><i class="fas fa-key text-yellow-500 mr-2"></i> Save New Master API</label>
@@ -163,7 +160,6 @@ adminApp.get('/', async (req, res) => {
     `);
 });
 
-// Save & Delete Master APIs
 adminApp.post('/add-master', async (req, res) => {
     try {
         let { name, ip, apiKey } = req.body;
@@ -210,14 +206,11 @@ adminApp.post('/delete-group', async (req, res) => {
     } catch (error) { res.status(500).send("Error deleting group"); }
 });
 
-// ==========================================
-// 2. INSIDE GROUP VIEW (RE-LINK MASTER FEATURE)
-// ==========================================
 adminApp.get('/group/:name', async (req, res) => {
     const groupName = req.params.name;
     const groupInfo = await Group.findOne({ name: groupName });
     const users = await User.find({ groupName: groupName });
-    const masters = await Master.find({}); // Get saved masters for re-linking
+    const masters = await Master.find({}); 
     
     const domainName = (groupInfo && groupInfo.nsRecord) ? groupInfo.nsRecord : (process.env.VPS_IP || req.hostname);
     const panelHost = process.env.VPS_IP || req.hostname;
@@ -250,7 +243,6 @@ adminApp.get('/group/:name', async (req, res) => {
         </tr>`;
     });
 
-    // 🌟 Re-Link Master Dropdown 🌟
     let relinkOptions = '<option value="" disabled selected>Select Master API to Re-link...</option>';
     masters.forEach(m => { relinkOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`; });
 
@@ -264,7 +256,6 @@ adminApp.get('/group/:name', async (req, res) => {
                 </div>
             </nav>
             <div class="max-w-7xl mx-auto px-4">
-                
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border p-6">
                         <label class="block text-sm font-black text-slate-800 mb-4"><i class="fas fa-user-plus text-green-500 mr-2"></i> Generate New Key</label>
@@ -276,7 +267,6 @@ adminApp.get('/group/:name', async (req, res) => {
                             <button type="submit" class="bg-indigo-600 text-white rounded-xl py-2.5 font-bold hover:bg-indigo-700 transition text-sm">Create</button>
                         </form>
                     </div>
-
                     <div class="bg-yellow-50 rounded-2xl shadow-sm border border-yellow-200 p-6">
                         <label class="block text-sm font-black text-yellow-800 mb-2"><i class="fas fa-plug text-yellow-600 mr-2"></i> Update Connection</label>
                         <p class="text-xs text-yellow-700 mb-3">If this group loses connection to its Master, re-link it here.</p>
@@ -287,7 +277,6 @@ adminApp.get('/group/:name', async (req, res) => {
                         </form>
                     </div>
                 </div>
-
                 <div class="bg-white rounded-2xl shadow-sm border overflow-hidden"><table class="w-full text-left"><thead><tr class="bg-slate-100 text-xs uppercase text-slate-500"><th class="p-4">No</th><th class="p-4">User</th><th class="p-4">Node</th><th class="p-4">Expire</th><th class="p-4">Usage</th><th class="p-4 text-right">Actions</th></tr></thead><tbody>${usersHtml}</tbody></table></div>
             </div>
             <script>
@@ -301,7 +290,6 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟 Re-Link API
 adminApp.post('/update-group-master', async (req, res) => {
     try {
         const { groupName, masterData } = req.body;
@@ -361,4 +349,3 @@ adminApp.post('/api/receive-gb', async (req, res) => {
 });
 
 module.exports = adminApp;
-EOF
