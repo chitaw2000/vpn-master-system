@@ -57,11 +57,7 @@ userApp.get('/panel/:token', async (req, res) => {
 
         // 🌟 One-Click App Import Links တည်ဆောက်ခြင်း
         const encodedName = encodeURIComponent(user.name.replace(/\s+/g, ''));
-        
-        // 🌟 SSCONF Protocol (with Capitalized Config Name: QitoVPN)
         const ssconfLink = `ssconf://${domainName}/${token}.json#QitoVPN_${encodedName}`; 
-        
-        // Hiddify is standard subscription compatible, directly using HTTP
         const hiddifyDeepLink = `hiddify://import/http://${domainName}/${token}.json`; 
 
         // 🌟 Premium Server List တည်ဆောက်ခြင်း
@@ -80,7 +76,6 @@ userApp.get('/panel/:token', async (req, res) => {
                     `<i class="fas fa-check-circle text-indigo-500 text-lg"></i>` : 
                     `<i class="fas fa-arrow-circle-right text-slate-600 hover:text-slate-400 transition text-lg"></i>`;
 
-                // 🌟 Custom Modal အတွက် Button ပြင်ဆင်ထားသည် (Browser Confirm အစား)
                 nodesListHtml += `
                 <form id="form-${safeNodeId}" action="/panel/change-server" method="POST" class="m-0 border-b border-slate-800 last:border-0">
                     <input type="hidden" name="token" value="${token}">
@@ -107,11 +102,7 @@ userApp.get('/panel/:token', async (req, res) => {
         }
 
         const usagePercent = user.totalGB > 0 ? ((user.usedGB / user.totalGB) * 100).toFixed(1) : 0;
-
-        // 🌟 အစ်ကို့ Logo Link ကို အသုံးပြုထားသည်
         const logoUrl = "https://i.postimg.cc/G2FPpD7C/QUITO-profile-1.png"; 
-
-        // 🌟 App Logos လင့်ခ်များကို အသုံးပြုထားသည်
         const outlineIconUrl = "https://i.postimg.cc/rm7q3wKz/images-(23).jpg";
         const hiddifyIconUrl = "https://i.postimg.cc/kXQ7Y99g/images-(6).png";
 
@@ -195,9 +186,7 @@ userApp.get('/panel/:token', async (req, res) => {
                 
                 <div id="switchModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-[#0b1121]/80 backdrop-blur-md opacity-0 transition-opacity duration-300">
                     <div class="bg-[#151f32] border border-slate-700 rounded-[2rem] p-8 w-[85%] max-w-sm shadow-[0_0_40px_rgba(0,0,0,0.5)] transform scale-95 transition-transform duration-300 relative overflow-hidden" id="modalContent">
-                        
                         <div class="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-indigo-500/20 rounded-full blur-3xl -mt-10"></div>
-                        
                         <div class="text-center relative z-10">
                             <div class="w-20 h-20 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto mb-5 border border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.2)]">
                                 <i class="fas fa-exchange-alt text-indigo-400 text-3xl"></i>
@@ -207,7 +196,6 @@ userApp.get('/panel/:token', async (req, res) => {
                                 Are you sure you want to connect to <br>
                                 <b id="modalServerName" class="text-indigo-400 text-lg tracking-wide block mt-1">Server</b>
                             </p>
-                            
                             <div class="flex gap-3">
                                 <button onclick="closeModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">Cancel</button>
                                 <button id="confirmBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(79,70,229,0.4)] active:scale-[0.98]">Confirm</button>
@@ -221,17 +209,13 @@ userApp.get('/panel/:token', async (req, res) => {
                     const token = '${token}';
                     let currentFormId = '';
 
-                    // 🌟 Premium Modal Logic
                     function confirmSwitch(formId, serverName) {
                         currentFormId = formId;
                         document.getElementById('modalServerName').innerText = serverName;
-                        
                         const modal = document.getElementById('switchModal');
                         const content = document.getElementById('modalContent');
-                        
                         modal.classList.remove('hidden');
                         modal.classList.add('flex');
-                        
                         setTimeout(() => {
                             modal.classList.remove('opacity-0');
                             content.classList.remove('scale-95');
@@ -241,10 +225,8 @@ userApp.get('/panel/:token', async (req, res) => {
                     function closeModal() {
                         const modal = document.getElementById('switchModal');
                         const content = document.getElementById('modalContent');
-                        
                         modal.classList.add('opacity-0');
                         content.classList.add('scale-95');
-                        
                         setTimeout(() => {
                             modal.classList.add('hidden');
                             modal.classList.remove('flex');
@@ -258,13 +240,11 @@ userApp.get('/panel/:token', async (req, res) => {
                         }
                     });
 
-                    // Background Ping Logic
                     async function fetchPings() {
                         for(let node of nodes) {
                             try {
                                 let res = await fetch('/panel/api/ping/' + token + '/' + encodeURIComponent(node));
                                 let data = await res.json();
-                                
                                 let safeNodeId = node.replace(/\\s+/g, '-');
                                 let pingEl = document.getElementById('ping-' + safeNodeId);
 
@@ -282,27 +262,41 @@ userApp.get('/panel/:token', async (req, res) => {
                         }
                     }
 
-                    // Copy Link Function
-                    function copyLink(link) { 
-                        var t = document.createElement("input"); 
-                        t.value = link; 
-                        document.body.appendChild(t); 
-                        t.select(); 
-                        document.execCommand("copy"); 
-                        document.body.removeChild(t); 
+                    // 🌟 PURE TEXT COPY FUNCTION (fixes Hiddify whitespace issue) 🌟
+                    function copyLink(rawLink) { 
+                        // အမှိုက် Space များကို အတင်းဖြတ်တောက်ခြင်း
+                        const cleanLink = rawLink.trim();
                         
-                        var btn = document.getElementById('copyBtn'); 
-                        btn.innerHTML = '<i class="fas fa-check-circle text-lg"></i> LINK COPIED!'; 
-                        btn.classList.replace('bg-indigo-600', 'bg-teal-500'); 
-                        btn.classList.replace('hover:bg-indigo-500', 'hover:bg-teal-400');
-                        btn.classList.replace('shadow-[0_6px_20px_rgba(79,70,229,0.35)]', 'shadow-[0_6px_20px_rgba(20,184,166,0.35)]');
-                        
-                        setTimeout(() => { 
-                            btn.innerHTML = '<i class="fas fa-copy text-lg"></i> Copy Subscription Link'; 
-                            btn.classList.replace('bg-teal-500', 'bg-indigo-600'); 
-                            btn.classList.replace('hover:bg-teal-400', 'hover:bg-indigo-500');
-                            btn.classList.replace('shadow-[0_6px_20px_rgba(20,184,166,0.35)]', 'shadow-[0_6px_20px_rgba(79,70,229,0.35)]');
-                        }, 3000); 
+                        const showSuccess = () => {
+                            var btn = document.getElementById('copyBtn'); 
+                            btn.innerHTML = '<i class="fas fa-check-circle text-lg"></i> LINK COPIED!'; 
+                            btn.classList.replace('bg-indigo-600', 'bg-teal-500'); 
+                            btn.classList.replace('hover:bg-indigo-500', 'hover:bg-teal-400');
+                            btn.classList.replace('shadow-[0_6px_20px_rgba(79,70,229,0.35)]', 'shadow-[0_6px_20px_rgba(20,184,166,0.35)]');
+                            
+                            setTimeout(() => { 
+                                btn.innerHTML = '<i class="fas fa-copy text-lg"></i> Copy Subscription Link'; 
+                                btn.classList.replace('bg-teal-500', 'bg-indigo-600'); 
+                                btn.classList.replace('hover:bg-teal-400', 'hover:bg-indigo-500');
+                                btn.classList.replace('shadow-[0_6px_20px_rgba(20,184,166,0.35)]', 'shadow-[0_6px_20px_rgba(79,70,229,0.35)]');
+                            }, 3000); 
+                        };
+
+                        // နောက်ဆုံးပေါ် (Modern) နည်းပညာဖြင့် အသန့်ရှင်းဆုံး Copy ကူးခြင်း
+                        if (navigator.clipboard && window.isSecureContext) {
+                            navigator.clipboard.writeText(cleanLink).then(showSuccess);
+                        } else {
+                            // Fallback for older browsers (using textarea to avoid rich-text formatting)
+                            let t = document.createElement("textarea"); 
+                            t.value = cleanLink; 
+                            t.style.position = "fixed";
+                            t.style.opacity = "0";
+                            document.body.appendChild(t); 
+                            t.select(); 
+                            document.execCommand("copy"); 
+                            document.body.removeChild(t); 
+                            showSuccess();
+                        }
                     }
 
                     setTimeout(fetchPings, 500);
