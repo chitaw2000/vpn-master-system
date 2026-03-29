@@ -2,6 +2,26 @@ require('dotenv').config();
 const express = require('express');
 require('./config/db')();
 
+// ... existing imports ...
+const setupSecurityHeaders = require('./security/headers');
+const setupSessionAndCsrf = require('./security/session');
+const { apiLimiter } = require('./security/rateLimiter');
+const { requireApiKey } = require('./security/apiKey');
+
+const app = express();
+
+// 1. Security Headers (Helmet)
+setupSecurityHeaders(app);
+
+// 2. Session & CSRF
+setupSessionAndCsrf(app);
+
+// 3. API Rate Limiting & Key Validation (Apply to all /api/ routes)
+app.use('/api/', apiLimiter);
+// app.use('/api/internal', requireApiKey); // Uncomment this to lock down internal APIs
+
+// ... your routes (app.use('/', ...)) ...
+
 const adminRoutes = require('./routes/admin');
 const userRoutes = require('./routes/user');
 
