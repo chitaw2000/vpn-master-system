@@ -7,6 +7,8 @@ const adminApp = express.Router();
 const Group = require('../models/Group');
 const User = require('../models/User');
 const Master = require('../models/Master');
+const Setting = require('../models/Setting'); // 🌟 NEW: Settings Model
+const { sendBackupDocument } = require('../utils/telegram'); // 🌟 NEW: Telegram Bot Logic
 const redisClient = require('../config/redis');
 
 // 🌟 Backup Directory Setup 🌟
@@ -23,6 +25,51 @@ function getMMTString() {
     const p = n => n.toString().padStart(2, '0');
     return `${mmt.getFullYear()}-${p(mmt.getMonth()+1)}-${p(mmt.getDate())}_${p(mmt.getHours())}-${p(mmt.getMinutes())}-${p(mmt.getSeconds())}`;
 }
+
+// 🌟 Full Backup Generator Helper 🌟
+async function generateFullBackupFile() {
+    const groups = await Group.find({});
+    const masters = await Master.find({});
+    const users = await User.find({});
+    
+    const data = { type: 'full', date: new Date(), groups, masters, users };
+    const filename = `Full_Backup_${getMMTString()}.json`;
+    const filePath = path.join(backupDir, filename);
+    
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    return { filePath, filename };
+}
+
+// 🌟 Auto Backup Loop Manager 🌟
+let backupIntervalId = null;
+async function startTelegramAutoBackup() {
+    if (backupIntervalId) clearInterval(backupIntervalId);
+    
+    try {
+        const setting = await Setting.findOne({});
+        if (!setting || !setting.botToken || !setting.adminId || !setting.backupIntervalHours) {
+            console.log("⚠️ Telegram Auto-Backup is disabled. Settings missing.");
+            return;
+        }
+
+        const intervalMs = setting.backupIntervalHours * 60 * 60 * 1000;
+        console.log(`✅ Telegram Auto-Backup started. Interval: ${setting.backupIntervalHours} hour(s).`);
+
+        backupIntervalId = setInterval(async () => {
+            try {
+                console.log("⏳ Generating Auto Backup...");
+                const { filePath, filename } = await generateFullBackupFile();
+                await sendBackupDocument(setting.botToken, setting.adminId, filePath, `🕒 Auto System Backup\nFile: ${filename}`);
+                console.log("✅ Auto Backup sent to Telegram.");
+            } catch (err) {
+                console.log("❌ Auto Backup Failed:", err.message);
+            }
+        }, intervalMs);
+    } catch (err) { console.log("Auto Backup Init Error:", err); }
+}
+// Start loop when server runs
+setTimeout(startTelegramAutoBackup, 5000);
+
 
 // 🌟 Exponential Backoff Retry Function
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
@@ -48,7 +95,6 @@ const getNavbar = (title = "QITO <span class='text-indigo-400 font-light ml-1'>A
                 </div>
                 <span class="hidden sm:inline">${title}</span>
             </a>
-            
             <div class="flex-1 flex justify-center">
                 <form action="/admin/search" method="POST" class="w-full max-w-lg relative group">
                     <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -58,7 +104,6 @@ const getNavbar = (title = "QITO <span class='text-indigo-400 font-light ml-1'>A
                     <button type="submit" class="absolute inset-y-0 right-0 pr-4 flex items-center text-xs font-bold text-indigo-400 hover:text-indigo-300 transition">FIND</button>
                 </form>
             </div>
-
             <a href="/admin/settings" class="shrink-0 w-12 h-12 flex items-center justify-center bg-slate-800/50 hover:bg-indigo-500/30 rounded-2xl border border-slate-700 hover:border-indigo-400/50 transition-all duration-300 group" title="Settings & Backups">
                 <i class="fas fa-cog text-xl text-slate-300 group-hover:text-indigo-300 group-hover:rotate-90 transition-transform duration-500"></i>
             </a>
@@ -70,7 +115,7 @@ const getLoadingModal = () => `
     <div id="loadingModal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-900/80 backdrop-blur-sm">
         <div class="bg-white p-8 rounded-3xl flex flex-col items-center shadow-2xl transform scale-105 transition-transform">
             <i class="fas fa-circle-notch fa-spin text-indigo-600 text-5xl mb-4"></i>
-            <p class="text-slate-800 font-black tracking-wide text-lg">Processing Backup...</p>
+            <p class="text-slate-800 font-black tracking-wide text-lg">Processing...</p>
             <p class="text-slate-500 text-xs font-bold mt-1">Please wait, do not close.</p>
         </div>
     </div>
@@ -137,13 +182,9 @@ adminApp.get('/', async (req, res) => {
             <div class="bg-gradient-to-r from-slate-800 to-slate-700 p-5 flex justify-between items-center">
                 <h3 class="text-lg font-black text-white flex items-center">
                     <i class="fas fa-server text-indigo-400 mr-2 drop-shadow-md"></i> ${g.name} 
-                    <span class="ml-3 text-[10px] font-black bg-indigo-500 text-white px-2 py-1 rounded-md shadow-sm border border-indigo-400 uppercase tracking-widest">
-                        ${g.masterName || 'API-1'}
-                    </span>
+                    <span class="ml-3 text-[10px] font-black bg-indigo-500 text-white px-2 py-1 rounded-md shadow-sm border border-indigo-400 uppercase tracking-widest">${g.masterName || 'API-1'}</span>
                 </h3>
-                <button type="button" onclick="openDoubleConfirmModal('${g.name}')" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2.5 rounded-xl transition" title="Delete Group">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
+                <button type="button" onclick="openDoubleConfirmModal('${g.name}')" class="text-white hover:text-red-400 bg-white/10 hover:bg-white/20 p-2.5 rounded-xl transition"><i class="fas fa-trash-alt"></i></button>
             </div>
             <div class="p-6 flex-1">
                 <div class="flex items-center justify-between mb-4 border-b border-slate-50 pb-4">
@@ -160,9 +201,7 @@ adminApp.get('/', async (req, res) => {
                 </div>
             </div>
             <div class="p-4 bg-slate-50 border-t border-slate-100">
-                <a href="/admin/group/${encodeURIComponent(g.name)}" class="flex items-center justify-center w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 shadow-[0_4px_15px_rgba(79,70,229,0.3)] hover:shadow-[0_6px_20px_rgba(79,70,229,0.4)] transition-all active:scale-[0.98]">
-                    Manage Group <i class="fas fa-arrow-right ml-2"></i>
-                </a>
+                <a href="/admin/group/${encodeURIComponent(g.name)}" class="flex items-center justify-center w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 shadow-[0_4px_15px_rgba(79,70,229,0.3)] hover:shadow-[0_6px_20px_rgba(79,70,229,0.4)] transition-all active:scale-[0.98]">Manage Group <i class="fas fa-arrow-right ml-2"></i></a>
             </div>
         </div>`;
     }
@@ -173,15 +212,10 @@ adminApp.get('/', async (req, res) => {
         masterOptions += `<option value="${m.ip}|${m.apiKey}|${m.name}">${m.name} (${m.ip})</option>`;
         mastersListHtml += `
             <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-2 hover:shadow-md transition">
-                <div>
-                    <span class="font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded text-xs mr-2">${m.name}</span> 
-                    <span class="text-sm font-semibold text-slate-600">${m.ip}</span>
-                </div>
+                <div><span class="font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded text-xs mr-2">${m.name}</span><span class="text-sm font-semibold text-slate-600">${m.ip}</span></div>
                 <form action="/admin/delete-master" method="POST" onsubmit="return confirm('ဖျက်မှာ သေချာလား?');" class="m-0">
                     <input type="hidden" name="id" value="${m._id}">
-                    <button type="submit" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg transition hover:bg-red-100">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    <button type="submit" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg transition hover:bg-red-100"><i class="fas fa-trash"></i></button>
                 </form>
             </div>`;
     });
@@ -211,54 +245,37 @@ adminApp.get('/', async (req, res) => {
                 
                 <div class="bg-white p-7 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 mb-10 animate-fade-in-up">
                     <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
-                        <label class="block text-lg font-black text-slate-800 mb-5 flex items-center">
-                            <i class="fas fa-key text-yellow-500 mr-2 text-xl drop-shadow"></i> Save Master API
-                        </label>
+                        <label class="block text-lg font-black text-slate-800 mb-5 flex items-center"><i class="fas fa-key text-yellow-500 mr-2 text-xl drop-shadow"></i> Save Master API</label>
                         <form action="/admin/add-master" method="POST" class="grid grid-cols-1 gap-3">
                             <input type="text" name="name" placeholder="Name (e.g., API-1)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
                             <input type="text" name="ip" placeholder="URL (http://ip:8888)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
                             <input type="password" name="apiKey" placeholder="API Key" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
-                            <button type="submit" class="mt-2 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]">
-                                <i class="fas fa-save mr-2"></i> Save API
-                            </button>
+                            <button type="submit" class="mt-2 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]"><i class="fas fa-save mr-2"></i> Save API</button>
                         </form>
                     </div>
                     <div class="flex-1 pl-0 md:pl-2">
                         <label class="block text-xs font-black text-slate-400 mb-3 uppercase tracking-widest">Saved APIs</label>
-                        <div class="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                            ${mastersListHtml || '<p class="text-sm text-slate-400 italic">No APIs saved yet.</p>'}
-                        </div>
+                        <div class="max-h-64 overflow-y-auto pr-2 custom-scrollbar">${mastersListHtml || '<p class="text-sm text-slate-400 italic">No APIs saved yet.</p>'}</div>
                     </div>
                 </div>
 
                 <div class="bg-white p-8 rounded-[2rem] shadow-md border border-slate-200 mb-10 animate-fade-in-up delay-100">
-                    <label class="block text-xl font-black text-slate-800 mb-6 flex items-center">
-                        <i class="fas fa-network-wired text-indigo-500 mr-3 text-2xl drop-shadow"></i> Create New Group
-                    </label>
+                    <label class="block text-xl font-black text-slate-800 mb-6 flex items-center"><i class="fas fa-network-wired text-indigo-500 mr-3 text-2xl drop-shadow"></i> Create New Group</label>
                     <div class="flex flex-col md:flex-row gap-4 mb-8 pb-8 border-b border-slate-100">
                         <div class="flex-1">
                             <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Select Master API</label>
-                            <select id="savedMasterSelector" class="w-full border-2 border-indigo-200 bg-indigo-50/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-indigo-900 transition hover:bg-indigo-50">
-                                ${masterOptions}
-                            </select>
+                            <select id="savedMasterSelector" class="w-full border-2 border-indigo-200 bg-indigo-50/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-indigo-900 transition hover:bg-indigo-50">${masterOptions}</select>
                         </div>
                         <div class="flex items-end">
-                            <button type="button" onclick="fetchGroupsFromSaved()" id="fetchBtn" class="w-full md:w-auto bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-indigo-700 transition shadow-[0_4px_15px_rgba(79,70,229,0.3)] active:scale-[0.98]">
-                                <i class="fas fa-sync-alt mr-2"></i> Fetch Groups
-                            </button>
+                            <button type="button" onclick="fetchGroupsFromSaved()" id="fetchBtn" class="w-full md:w-auto bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-indigo-700 transition shadow-[0_4px_15px_rgba(79,70,229,0.3)] active:scale-[0.98]"><i class="fas fa-sync-alt mr-2"></i> Fetch Groups</button>
                         </div>
                     </div>
 
                     <form action="/admin/create-group" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-5">
-                        <input type="hidden" name="masterIp" id="formMasterIp">
-                        <input type="hidden" name="masterApiKey" id="formMasterApiKey">
-                        <input type="hidden" name="masterName" id="formMasterName">
-                        
+                        <input type="hidden" name="masterIp" id="formMasterIp"><input type="hidden" name="masterApiKey" id="formMasterApiKey"><input type="hidden" name="masterName" id="formMasterName">
                         <div>
                             <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">1. Select Group</label>
-                            <select name="masterGroupId" id="masterGroupSelect" required class="w-full border-2 border-slate-200 bg-slate-50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-slate-700 transition">
-                                <option value="" disabled selected>Fetch groups first...</option>
-                            </select>
+                            <select name="masterGroupId" id="masterGroupSelect" required class="w-full border-2 border-slate-200 bg-slate-50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-slate-700 transition"><option value="" disabled selected>Fetch groups first...</option></select>
                         </div>
                         <div>
                             <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">2. Local Name</label>
@@ -269,9 +286,7 @@ adminApp.get('/', async (req, res) => {
                             <input type="text" name="nsRecord" placeholder="e.g. ns1.domain.com" required class="w-full border-2 border-slate-200 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-indigo-700 transition">
                         </div>
                         <div class="flex items-end">
-                            <button type="submit" class="w-full bg-slate-800 text-white px-6 py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]">
-                                <i class="fas fa-plus mr-2"></i> Create Group
-                            </button>
+                            <button type="submit" class="w-full bg-slate-800 text-white px-6 py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]"><i class="fas fa-plus mr-2"></i> Create Group</button>
                         </div>
                     </form>
                 </div>
@@ -283,24 +298,14 @@ adminApp.get('/', async (req, res) => {
 
             <div id="deleteGroupModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 backdrop-blur-sm transition-opacity opacity-0 duration-300">
                 <div class="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-2xl border border-red-100 transform scale-95 transition-transform duration-300" id="deleteModalContent">
-                    <div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5 border-4 border-red-50">
-                        <i class="fas fa-exclamation-triangle text-red-500 text-3xl animate-pulse"></i>
-                    </div>
+                    <div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5 border-4 border-red-50"><i class="fas fa-exclamation-triangle text-red-500 text-3xl animate-pulse"></i></div>
                     <div class="text-center">
                         <h3 class="text-2xl font-black text-slate-800 mb-2">WARNING!</h3>
-                        <p class="text-slate-500 text-sm font-semibold mb-6">
-                            Are you absolutely sure you want to delete <br>
-                            <b id="deleteModalGroupName" class="text-red-600 text-lg block mt-1">Group</b>? <br><br>
-                            <span class="text-xs text-red-400">All users in this group will also be permanently deleted!</span>
-                        </p>
+                        <p class="text-slate-500 text-sm font-semibold mb-6">Are you absolutely sure you want to delete <br><b id="deleteModalGroupName" class="text-red-600 text-lg block mt-1">Group</b>? <br><br><span class="text-xs text-red-400">All users in this group will also be permanently deleted!</span></p>
                         <form action="/admin/delete-group" method="POST" class="flex flex-col gap-3">
                             <input type="hidden" name="groupName" id="deleteGroupNameInput">
-                            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-black py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(220,38,38,0.4)] active:scale-[0.98]">
-                                YES, DELETE FOREVER
-                            </button>
-                            <button type="button" onclick="closeDoubleConfirmModal()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">
-                                Cancel
-                            </button>
+                            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-black py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(220,38,38,0.4)] active:scale-[0.98]">YES, DELETE FOREVER</button>
+                            <button type="button" onclick="closeDoubleConfirmModal()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">Cancel</button>
                         </form>
                     </div>
                 </div>
@@ -310,73 +315,41 @@ adminApp.get('/', async (req, res) => {
                 async function fetchGroupsFromSaved() {
                     const selector = document.getElementById('savedMasterSelector').value; 
                     const btn = document.getElementById('fetchBtn');
-                    
                     if(!selector) return alert("Please select a Master API!");
                     
                     const [ip, key, name] = selector.split('|'); 
                     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Fetching...';
                     
                     try {
-                        const res = await fetch('/admin/api/fetch-master-groups', { 
-                            method: 'POST', 
-                            headers: { 'Content-Type': 'application/json' }, 
-                            body: JSON.stringify({ masterIp: ip, masterApiKey: key }) 
-                        });
+                        const res = await fetch('/admin/api/fetch-master-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ masterIp: ip, masterApiKey: key }) });
                         const data = await res.json();
                         
                         if(data.success) {
                             let options = '<option value="" disabled selected>Select from Master...</option>';
-                            data.groups.forEach(g => { 
-                                options += \`<option value="\${g.id}">\${g.name} (\${g.serverCount} Nodes)</option>\`; 
-                            });
+                            data.groups.forEach(g => { options += \`<option value="\${g.id}">\${g.name} (\${g.serverCount} Nodes)</option>\`; });
                             
                             document.getElementById('masterGroupSelect').innerHTML = options; 
                             document.getElementById('masterGroupSelect').classList.remove('bg-slate-50');
                             document.getElementById('masterGroupSelect').classList.add('bg-white', 'border-indigo-300');
+                            document.getElementById('formMasterIp').value = ip; document.getElementById('formMasterApiKey').value = key; document.getElementById('formMasterName').value = name;
                             
-                            document.getElementById('formMasterIp').value = ip; 
-                            document.getElementById('formMasterApiKey').value = key; 
-                            document.getElementById('formMasterName').value = name;
-                            
-                            btn.innerHTML = '<i class="fas fa-check mr-2"></i> Connected!'; 
-                            btn.classList.replace('bg-indigo-600', 'bg-green-500'); 
-                            
-                            setTimeout(() => { 
-                                btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; 
-                                btn.classList.replace('bg-green-500', 'bg-indigo-600'); 
-                            }, 2000);
-                        } else { 
-                            alert("Failed: " + data.error); 
-                            btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; 
-                        }
-                    } catch(e) { 
-                        alert("Network Error!"); 
-                        btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; 
-                    }
+                            btn.innerHTML = '<i class="fas fa-check mr-2"></i> Connected!'; btn.classList.replace('bg-indigo-600', 'bg-green-500'); 
+                            setTimeout(() => { btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; btn.classList.replace('bg-green-500', 'bg-indigo-600'); }, 2000);
+                        } else { alert("Failed: " + data.error); btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; }
+                    } catch(e) { alert("Network Error!"); btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; }
                 }
 
                 function openDoubleConfirmModal(groupName) {
-                    document.getElementById('deleteGroupNameInput').value = groupName;
-                    document.getElementById('deleteModalGroupName').innerText = groupName;
-                    const modal = document.getElementById('deleteGroupModal');
-                    const content = document.getElementById('deleteModalContent');
-                    modal.classList.remove('hidden');
-                    modal.classList.add('flex');
-                    setTimeout(() => {
-                        modal.classList.remove('opacity-0');
-                        content.classList.remove('scale-95');
-                    }, 10);
+                    document.getElementById('deleteGroupNameInput').value = groupName; document.getElementById('deleteModalGroupName').innerText = groupName;
+                    const modal = document.getElementById('deleteGroupModal'); const content = document.getElementById('deleteModalContent');
+                    modal.classList.remove('hidden'); modal.classList.add('flex');
+                    setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
                 }
 
                 function closeDoubleConfirmModal() {
-                    const modal = document.getElementById('deleteGroupModal');
-                    const content = document.getElementById('deleteModalContent');
-                    modal.classList.add('opacity-0');
-                    content.classList.add('scale-95');
-                    setTimeout(() => {
-                        modal.classList.add('hidden');
-                        modal.classList.remove('flex');
-                    }, 300);
+                    const modal = document.getElementById('deleteGroupModal'); const content = document.getElementById('deleteModalContent');
+                    modal.classList.add('opacity-0'); content.classList.add('scale-95');
+                    setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 300);
                 }
             </script>
         </body>
@@ -385,7 +358,7 @@ adminApp.get('/', async (req, res) => {
 });
 
 // ==========================================
-// 🌟 SETTINGS & BACKUP PAGE
+// 🌟 SETTINGS, TELEGRAM BOT & BACKUP PAGE 🌟
 // ==========================================
 adminApp.get('/settings', async (req, res) => {
     let fullBackups = [];
@@ -398,6 +371,9 @@ adminApp.get('/settings', async (req, res) => {
             else if (f.startsWith('Group_')) groupBackups.push(f);
         });
     }
+
+    let setting = await Setting.findOne({});
+    if (!setting) setting = { botToken: '', adminId: '', backupIntervalHours: 1 };
 
     const renderBackupItem = (b, type) => {
         const dateMatch = b.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
@@ -447,11 +423,43 @@ adminApp.get('/settings', async (req, res) => {
 
             <div class="max-w-6xl mx-auto px-4 animate-fade-in-up">
                 <div class="mb-8">
-                    <h2 class="text-3xl font-black text-slate-800"><i class="fas fa-database text-indigo-500 mr-3"></i> Backup Management</h2>
-                    <p class="text-slate-500 font-semibold mt-2">Manage your system backups. All times are in Myanmar Standard Time (MMT).</p>
+                    <h2 class="text-3xl font-black text-slate-800"><i class="fas fa-database text-indigo-500 mr-3"></i> Settings & Backups</h2>
+                    <p class="text-slate-500 font-semibold mt-2">Manage your system backups and automation. All times are in Myanmar Standard Time (MMT).</p>
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200 lg:col-span-2">
+                        <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                            <h3 class="text-xl font-black text-slate-800"><i class="fab fa-telegram text-blue-500 mr-2"></i> Telegram Auto-Backup Settings</h3>
+                        </div>
+                        <form action="/admin/save-telegram-settings" method="POST" class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+                            <div>
+                                <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Bot Token</label>
+                                <input type="text" name="botToken" value="${setting.botToken}" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-blue-500 font-mono text-sm text-slate-700 transition">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Admin Chat ID</label>
+                                <input type="text" name="adminId" value="${setting.adminId}" placeholder="123456789" class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-blue-500 font-mono text-sm text-slate-700 transition">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Interval (Hours)</label>
+                                <input type="number" name="backupIntervalHours" value="${setting.backupIntervalHours}" min="1" class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-blue-500 font-bold text-sm text-slate-700 transition">
+                            </div>
+                            <div class="md:col-span-3 flex gap-3">
+                                <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(37,99,235,0.3)] active:scale-[0.98]">
+                                    <i class="fas fa-save mr-2"></i> Save Telegram Settings
+                                </button>
+                            </div>
+                        </form>
+                        <div class="border-t border-slate-100 pt-6">
+                            <form action="/admin/send-telegram-backup" method="POST" class="m-0" onsubmit="document.getElementById('loadingModal').classList.replace('hidden', 'flex');">
+                                <button type="submit" class="w-full bg-slate-800 hover:bg-black text-white font-bold py-3.5 rounded-2xl transition shadow-md active:scale-[0.98]">
+                                    <i class="fas fa-paper-plane mr-2"></i> Send Full Backup to Telegram Now
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
                     <div class="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200">
                         <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
                             <h3 class="text-xl font-black text-slate-800"><i class="fas fa-globe text-purple-500 mr-2"></i> Full System Backups</h3>
@@ -459,7 +467,7 @@ adminApp.get('/settings', async (req, res) => {
                         <div class="flex gap-3 mb-6">
                             <form action="/admin/backup-all" method="POST" class="flex-1 m-0">
                                 <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(147,51,234,0.3)] active:scale-[0.98]">
-                                    <i class="fas fa-plus-circle mr-2"></i> Create Full Backup
+                                    <i class="fas fa-plus-circle mr-2"></i> Create Backup
                                 </button>
                             </form>
                             <button type="button" onclick="triggerUpload('full')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">
@@ -493,6 +501,36 @@ adminApp.get('/settings', async (req, res) => {
     `);
 });
 
+// 🌟 TELEGRAM ROUTES 🌟
+adminApp.post('/save-telegram-settings', async (req, res) => {
+    try {
+        const { botToken, adminId, backupIntervalHours } = req.body;
+        await Setting.findOneAndUpdate({}, { 
+            botToken, adminId, backupIntervalHours: Number(backupIntervalHours) 
+        }, { upsert: true });
+        
+        startTelegramAutoBackup(); // Restart loop with new settings
+        res.send(`<script>alert('Telegram Settings Saved & Auto-Backup restarted!'); window.location.href='/admin/settings';</script>`);
+    } catch(e) { res.status(500).send("Error saving settings"); }
+});
+
+adminApp.post('/send-telegram-backup', async (req, res) => {
+    try {
+        const setting = await Setting.findOne({});
+        if (!setting || !setting.botToken || !setting.adminId) {
+            return res.send(`<script>alert('❌ Please configure Bot Token and Admin ID first!'); window.location.href='/admin/settings';</script>`);
+        }
+        
+        const { filePath, filename } = await generateFullBackupFile();
+        await sendBackupDocument(setting.botToken, setting.adminId, filePath, `📦 Manual System Backup\nFile: ${filename}\nTime: ${getMMTString()}`);
+        
+        res.send(`<script>alert('✅ Backup successfully sent to Telegram!'); window.location.href='/admin/settings';</script>`);
+    } catch(e) { 
+        res.send(`<script>alert('❌ Failed to send Telegram Backup: ${e.message}'); window.location.href='/admin/settings';</script>`);
+    }
+});
+
+
 // 🌟 SEARCH API 🌟
 adminApp.post('/search', async (req, res) => {
     try {
@@ -515,18 +553,9 @@ adminApp.post('/search', async (req, res) => {
 // 🌟 BACKUP APIs 🌟
 adminApp.post('/backup-all', async (req, res) => {
     try {
-        const groups = await Group.find({});
-        const masters = await Master.find({});
-        const users = await User.find({});
-        
-        const data = { type: 'full', date: new Date(), groups, masters, users };
-        const filename = `Full_Backup_${getMMTString()}.json`;
-        
-        fs.writeFileSync(path.join(backupDir, filename), JSON.stringify(data, null, 2));
+        await generateFullBackupFile();
         res.redirect('/admin/settings');
-    } catch (err) {
-        res.status(500).send("Error creating backup.");
-    }
+    } catch (err) { res.status(500).send("Error creating backup."); }
 });
 
 adminApp.post('/backup-group', async (req, res) => {
@@ -862,7 +891,7 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟 EDIT USER LOGIC (SYNC TO MASTER WITH USED GB) 🌟
+// 🌟 EDIT USER LOGIC (SYNC USED GB TO MASTER) 🌟
 adminApp.post('/edit-user', async (req, res) => {
     try {
         const { groupName, oldToken, newToken, newTotalGB, newExpireDate } = req.body;
@@ -880,14 +909,13 @@ adminApp.post('/edit-user', async (req, res) => {
             await user.save();
             try { await redisClient.del(oldToken); } catch(e){}
 
-            // Update Master with USED GB
             try {
                 const groupInfo = await Group.findOne({ name: groupName });
                 if (groupInfo && groupInfo.masterIp) {
                     await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
                         username: user.name, 
                         totalGB: user.totalGB, 
-                        usedGB: user.usedGB, // 🌟 Fix applied here 🌟
+                        usedGB: user.usedGB, // 🌟 USED GB 🌟
                         expireDate: user.expireDate
                     }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
                 }
@@ -925,12 +953,11 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
                         }
                         await User.updateOne({ _id: user._id }, { $set: updateQuery });
 
-                        // Force Master GB Update with USED GB
                         try {
                             await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
                                 username: user.name, 
                                 totalGB: user.totalGB, 
-                                usedGB: user.usedGB, // 🌟 Fix applied here 🌟
+                                usedGB: user.usedGB, // 🌟 USED GB 🌟
                                 expireDate: user.expireDate
                             }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 3000 });
                         } catch (e) {}
