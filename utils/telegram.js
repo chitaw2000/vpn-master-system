@@ -1,27 +1,62 @@
-// File: utils/telegram.js
-const axios = require('axios');
-const FormData = require('form-data');
+const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
+const { generateFullBackupFile, getMMTString } = require('./backup');
 
-// Telegram သို့ Backup ဖိုင် ပို့ပေးမည့် Function
-async function sendBackupDocument(botToken, chatId, filePath, caption = "") {
+let bot = null;
+
+function initTelegramBot(token, adminId) {
+    // အကယ်၍ Bot run နေပြီးသားဖြစ်လျှင် အရင်ရပ်ပါမည်
+    if (bot) {
+        bot.stopPolling();
+        bot = null;
+    }
+    if (!token || !adminId) return;
+
+    // Bot ကို အသစ်ပြန်စပါမည်
+    bot = new TelegramBot(token, { polling: true });
+
+    // 🌟 /start နှိပ်လျှင် Keyboard ခလုတ်ပေါ်စေရန် 🌟
+    bot.onText(/\/start/, (msg) => {
+        if (msg.chat.id.toString() !== adminId) return;
+        const opts = {
+            reply_markup: {
+                keyboard: [[{ text: '📦 Manual Backup' }]],
+                resize_keyboard: true,
+                persistent: true
+            }
+        };
+        bot.sendMessage(msg.chat.id, "👋 Welcome Admin! Auto-backup is running.\nအောက်ပါခလုတ်ကို နှိပ်၍လည်း Backup ကို အချိန်မရွေး ယူနိုင်ပါသည်။", opts);
+    });
+
+    // 🌟 Manual Backup ခလုတ် နှိပ်သောအခါ 🌟
+    bot.on('message', async (msg) => {
+        if (msg.chat.id.toString() !== adminId) return;
+        
+        if (msg.text === '📦 Manual Backup') {
+            bot.sendMessage(msg.chat.id, "⏳ Backup ဖိုင် ထုတ်ယူနေပါသည်... ခေတ္တစောင့်ပါ။");
+            try {
+                const { filePath, filename } = await generateFullBackupFile();
+                await bot.sendDocument(msg.chat.id, filePath, {
+                    caption: `📦 Manual System Backup\nFile: ${filename}\nTime: ${getMMTString()}`
+                });
+            } catch (err) {
+                bot.sendMessage(msg.chat.id, "❌ Backup ထုတ်ယူရာတွင် အခက်အခဲရှိနေပါသည်: " + err.message);
+            }
+        }
+    });
+}
+
+// 🌟 Auto Time ပြည့်လျှင် ပို့မည့် Function 🌟
+async function sendAutoBackupDocument(adminId) {
+    if (!bot || !adminId) return;
     try {
-        if (!fs.existsSync(filePath)) throw new Error("Backup file not found.");
-
-        const form = new FormData();
-        form.append('chat_id', chatId);
-        form.append('caption', caption);
-        form.append('document', fs.createReadStream(filePath));
-
-        const response = await axios.post(`https://api.telegram.org/bot${botToken}/sendDocument`, form, {
-            headers: form.getHeaders(),
-            timeout: 60000 // File ကြီးလျှင် အချိန်ကြာနိုင်သဖြင့် 60s ပေးထားပါသည်
+        const { filePath, filename } = await generateFullBackupFile();
+        await bot.sendDocument(adminId, filePath, {
+            caption: `🕒 Auto System Backup\nFile: ${filename}\nTime: ${getMMTString()}`
         });
-        return response.data;
     } catch (error) {
-        console.error("❌ Telegram Send Error:", error.message);
-        throw error;
+        console.error("❌ Auto Backup Send Error:", error.message);
     }
 }
 
-module.exports = { sendBackupDocument };
+module.exports = { initTelegramBot, sendAutoBackupDocument };
