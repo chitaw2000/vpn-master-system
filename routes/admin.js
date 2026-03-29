@@ -8,8 +8,8 @@ const Group = require('../models/Group');
 const User = require('../models/User');
 const Master = require('../models/Master');
 const Setting = require('../models/Setting'); 
-const { generateFullBackupFile, getMMTString, backupDir } = require('../utils/backup'); // 🌟 NEW
-const { initTelegramBot, sendAutoBackupDocument } = require('../utils/telegram'); // 🌟 NEW
+const { generateFullBackupFile, getMMTString, backupDir } = require('../utils/backup');
+const { initTelegramBot, sendAutoBackupDocument } = require('../utils/telegram');
 const redisClient = require('../config/redis');
 
 // 🌟 Auto Backup Loop Manager (MINUTES) 🌟
@@ -24,10 +24,8 @@ async function startTelegramAutoBackup() {
             return;
         }
 
-        // Initialize Bot Polling for Keyboard Buttons
         initTelegramBot(setting.botToken, setting.adminId);
-
-        const intervalMs = setting.backupIntervalMinutes * 60 * 1000; // 🌟 Minutes to Milliseconds
+        const intervalMs = setting.backupIntervalMinutes * 60 * 1000;
         console.log(`✅ Telegram Auto-Backup started. Interval: ${setting.backupIntervalMinutes} Minute(s).`);
 
         backupIntervalId = setInterval(async () => {
@@ -39,7 +37,7 @@ async function startTelegramAutoBackup() {
 setTimeout(startTelegramAutoBackup, 3000);
 
 
-// 🌟 Exponential Backoff Retry Function
+// 🌟🌟 FIXED: Exponential Backoff with 401 Loop Stop 🌟🌟
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
     const method = (config && config.method) ? config.method.toLowerCase() : 'post';
     for (let i = 0; i < retries; i++) {
@@ -47,6 +45,11 @@ async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
             if (method === 'get') return await axios.get(url, config);
             else return await axios.post(url, data || {}, config); 
         } catch (err) {
+            // 🛑 Master API Required: Stop retry loop on 401 Invalid Key
+            if (err.response && err.response.status === 401) {
+                console.error("⛔️ API Key Error (401). Stopping retries for URL:", url);
+                throw err; 
+            }
             if (i === retries - 1) throw err;
             await new Promise(res => setTimeout(res, delay * Math.pow(2, i))); 
         }
@@ -216,7 +219,7 @@ adminApp.get('/', async (req, res) => {
                         <label class="block text-lg font-black text-slate-800 mb-5 flex items-center"><i class="fas fa-key text-yellow-500 mr-2 text-xl drop-shadow"></i> Save Master API</label>
                         <form action="/admin/add-master" method="POST" class="grid grid-cols-1 gap-3">
                             <input type="text" name="name" placeholder="Name (e.g., API-1)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
-                            <input type="text" name="ip" placeholder="URL (http://ip:8888)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
+                            <input type="text" name="ip" placeholder="URL (https://dash.datthabaluu.me)" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
                             <input type="password" name="apiKey" placeholder="API Key" required class="border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-indigo-500 font-bold text-sm text-slate-800 transition">
                             <button type="submit" class="mt-2 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-black transition shadow-md active:scale-[0.98]"><i class="fas fa-save mr-2"></i> Save API</button>
                         </form>
@@ -326,7 +329,7 @@ adminApp.get('/', async (req, res) => {
 });
 
 // ==========================================
-// 🌟 SETTINGS, TELEGRAM BOT & BACKUP PAGE 🌟
+// 🌟 SETTINGS & BACKUP PAGE 🌟
 // ==========================================
 adminApp.get('/settings', async (req, res) => {
     let fullBackups = [];
@@ -478,7 +481,7 @@ adminApp.post('/save-telegram-settings', async (req, res) => {
             botToken, adminId, backupIntervalMinutes: Number(backupIntervalMinutes) 
         }, { upsert: true });
         
-        startTelegramAutoBackup(); // Restart loop with new settings
+        startTelegramAutoBackup(); 
         res.send(`<script>alert('Telegram Settings Saved & Auto-Backup restarted!'); window.location.href='/admin/settings';</script>`);
     } catch(e) { res.status(500).send("Error saving settings"); }
 });
@@ -588,14 +591,16 @@ adminApp.post('/api/fetch-master-groups', async (req, res) => {
     try { 
         let { masterIp, masterApiKey } = req.body; 
         masterIp = masterIp.replace(/\/$/, ""); 
+        const apiKeyHeader = masterApiKey || process.env.PANELMASTER_API_KEY; // 🌟 Security Standard Fallback
+        
         try {
             const response = await fetchWithRetry(masterIp + '/api/active-groups', null, { 
-                method: 'get', headers: { 'x-api-key': masterApiKey }, timeout: 5000 
+                method: 'get', headers: { 'x-api-key': apiKeyHeader }, timeout: 5000 
             });
             if (response.data && response.data.groups) return res.json({ success: true, groups: response.data.groups }); 
         } catch (getErr) {
             const responsePost = await fetchWithRetry(masterIp + '/api/active-groups', {}, { 
-                method: 'post', headers: { 'x-api-key': masterApiKey }, timeout: 5000 
+                method: 'post', headers: { 'x-api-key': apiKeyHeader }, timeout: 5000 
             });
             if (responsePost.data && responsePost.data.groups) return res.json({ success: true, groups: responsePost.data.groups }); 
             else throw new Error("Invalid API Response");
@@ -635,9 +640,10 @@ adminApp.post('/delete-group', async (req, res) => {
         const groupInfo = await Group.findOne({ name: req.body.groupName }); 
         const users = await User.find({ groupName: req.body.groupName });
         if (groupInfo) { 
+            const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
             for (const u of users) { 
                 try { 
-                    await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: u.name, token: u.token }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); 
+                    await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: u.name, token: u.token }, { headers: { 'x-api-key': apiKeyHeader } }); 
                 } catch(e) {} 
             } 
         }
@@ -860,7 +866,7 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟 EDIT USER LOGIC (SYNC USED GB TO MASTER) 🌟
+// 🌟 EDIT USER LOGIC (SYNC USED GB TO MASTER INSTANTLY) 🌟
 adminApp.post('/edit-user', async (req, res) => {
     try {
         const { groupName, oldToken, newToken, newTotalGB, newExpireDate } = req.body;
@@ -881,12 +887,13 @@ adminApp.post('/edit-user', async (req, res) => {
             try {
                 const groupInfo = await Group.findOne({ name: groupName });
                 if (groupInfo && groupInfo.masterIp) {
+                    const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
                     await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
                         username: user.name, 
                         totalGB: user.totalGB, 
-                        usedGB: user.usedGB, // 🌟 USED GB 🌟
+                        usedGB: user.usedGB, // 🌟 USED GB ALWAYS SYNCED 🌟
                         expireDate: user.expireDate
-                    }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
+                    }, { headers: { 'x-api-key': apiKeyHeader } });
                 }
             } catch (masterErr) { console.log("⚠️ Master Server update missed."); }
         }
@@ -901,6 +908,7 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
         const groupInfo = await Group.findOne({ name: groupName });
         if (!groupInfo || !groupInfo.masterIp) return res.redirect('/admin');
 
+        const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
         const users = await User.find({ groupName: groupName });
         const batchSize = 5;
         
@@ -910,7 +918,7 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
                 try {
                     const masterResponse = await fetchWithRetry(groupInfo.masterIp + '/api/generate-keys', {
                         masterGroupId: groupInfo.masterGroupId, userName: user.name, totalGB: user.totalGB, expireDate: user.expireDate
-                    }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 8000 });
+                    }, { headers: { 'x-api-key': apiKeyHeader }, timeout: 8000 });
 
                     if (masterResponse.data && masterResponse.data.keys) {
                         const updateQuery = {};
@@ -926,9 +934,9 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
                             await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
                                 username: user.name, 
                                 totalGB: user.totalGB, 
-                                usedGB: user.usedGB, // 🌟 USED GB 🌟
+                                usedGB: user.usedGB, // 🌟 OVERWRITE MASTER WITH BACKUP USED GB 🌟
                                 expireDate: user.expireDate
-                            }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 3000 });
+                            }, { headers: { 'x-api-key': apiKeyHeader }, timeout: 3000 });
                         } catch (e) {}
                     }
                 } catch (err) { console.log(`❌ Failed to sync nodes for user: ${user.name}`); }
@@ -945,12 +953,13 @@ adminApp.post('/add-user', async (req, res) => {
         const groupInfo = await Group.findOne({ name: groupName });
         if(!groupInfo || !groupInfo.masterIp) return res.status(400).send("Invalid Group Setup");
 
+        const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
         const lastUser = await User.findOne({ groupName: groupName }).sort({ userNo: -1 });
         const nextNo = (lastUser && lastUser.userNo) ? lastUser.userNo + 1 : 1;
 
         const masterResponse = await fetchWithRetry(groupInfo.masterIp + '/api/generate-keys', {
             masterGroupId: groupInfo.masterGroupId, userName: name, totalGB, expireDate
-        }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
+        }, { headers: { 'x-api-key': apiKeyHeader } });
 
         if (masterResponse.data && masterResponse.data.keys) {
             const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -974,7 +983,8 @@ adminApp.post('/delete-user', async (req, res) => {
         const groupInfo = await Group.findOne({ name: req.body.groupName });
         const user = await User.findOne({ token: token });
         if (groupInfo && user) {
-            try { await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: user.name, token: token }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch(e) {}
+            const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
+            try { await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: user.name, token: token }, { headers: { 'x-api-key': apiKeyHeader } }); } catch(e) {}
         }
         await User.deleteOne({ token: token });
         res.redirect('/admin/group/' + encodeURIComponent(req.body.groupName));
@@ -1004,7 +1014,9 @@ adminApp.post('/api/internal/sync-new-server', async (req, res) => {
         if (!masterGroupId || !newServerName || !userKeys) return res.status(400).json({ error: "Invalid payload data" });
 
         const validGroup = await Group.findOne({ masterGroupId: masterGroupId, masterApiKey: apiKey });
-        if (!validGroup) return res.status(401).json({ error: "Unauthorized API Key" });
+        if (!validGroup && apiKey !== process.env.PANELMASTER_API_KEY) {
+            return res.status(401).json({ error: "Unauthorized API Key" });
+        }
 
         let successCount = 0;
         for (const [identifier, newConfig] of Object.entries(userKeys)) {
