@@ -5,12 +5,20 @@ const redisClient = require('../config/redis');
 const User = require('../models/User');
 const Group = require('../models/Group');
 
+// 🌟🌟 FIXED: Exponential Backoff with 401 Loop Stop 🌟🌟
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
+    const method = (config && config.method) ? config.method.toLowerCase() : 'post';
     for (let i = 0; i < retries; i++) {
-        try { return await axios.post(url, data, config); } 
-        catch (err) {
+        try {
+            if (method === 'get') return await axios.get(url, config);
+            else return await axios.post(url, data || {}, config); 
+        } catch (err) {
+            if (err.response && err.response.status === 401) {
+                console.error("⛔️ API Key Error (401). Stopping retries for URL:", url);
+                throw err; 
+            }
             if (i === retries - 1) throw err;
-            await new Promise(res => setTimeout(res, delay * Math.pow(2, i)));
+            await new Promise(res => setTimeout(res, delay * Math.pow(2, i))); 
         }
     }
 }
@@ -23,8 +31,9 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         if (!group || !group.masterIp) return res.json({ status: 'offline' });
 
+        const apiKeyHeader = group.masterApiKey || process.env.PANELMASTER_API_KEY;
         const url = `${group.masterIp}/api/ping/${encodeURIComponent(nodeName)}`;
-        const response = await axios.get(url, { headers: { 'x-api-key': group.masterApiKey }, timeout: 4000 });
+        const response = await axios.get(url, { headers: { 'x-api-key': apiKeyHeader }, timeout: 4000 });
         res.json(response.data);
     } catch (error) { res.json({ status: 'offline' }); }
 });
@@ -283,11 +292,13 @@ userApp.post('/panel/change-server', async (req, res) => {
         const groupInfo = await Group.findOne({ name: user.groupName });
         if (!groupInfo) return res.status(404).send("Group Error");
 
+        const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
+
         if (!user.accessKeys || !user.accessKeys[newServer]) {
             try {
                 const masterResponse = await fetchWithRetry(groupInfo.masterIp + '/api/generate-keys', {
                     masterGroupId: groupInfo.masterGroupId, userName: user.name, totalGB: user.totalGB, expireDate: user.expireDate
-                }, { headers: { 'x-api-key': groupInfo.masterApiKey } });
+                }, { headers: { 'x-api-key': apiKeyHeader } });
                 
                 if (masterResponse.data && masterResponse.data.keys) { 
                     const updateQuery = {};
@@ -300,7 +311,7 @@ userApp.post('/panel/change-server', async (req, res) => {
         }
         user.currentServer = newServer; await user.save(); 
         try { await redisClient.del(token); } catch(e){}
-        try { await fetchWithRetry(groupInfo.masterIp + '/api/webhook/switch', { token: token, activeServer: newServer }, { headers: { 'x-api-key': groupInfo.masterApiKey } }); } catch (err) {}
+        try { await fetchWithRetry(groupInfo.masterIp + '/api/webhook/switch', { token: token, activeServer: newServer }, { headers: { 'x-api-key': apiKeyHeader } }); } catch (err) {}
         
         res.redirect('/panel/' + token + '?switched=true');
     } catch (error) { res.status(500).send("Error Changing Server"); }
@@ -328,7 +339,8 @@ userApp.get('/:token.json', async (req, res) => {
             try {
                 const groupInfo = await Group.findOne({ name: user.groupName });
                 if (groupInfo && groupInfo.masterIp) {
-                    axios.post(groupInfo.masterIp + '/api/internal/block-user', { username: user.name }, { headers: { 'x-api-key': groupInfo.masterApiKey }, timeout: 2000 }).catch(() => {});
+                    const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
+                    axios.post(groupInfo.masterIp + '/api/internal/block-user', { username: user.name }, { headers: { 'x-api-key': apiKeyHeader }, timeout: 2000 }).catch(() => {});
                 }
             } catch (e) {}
 
@@ -362,14 +374,33 @@ userApp.get('/:token.json', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "System Error" }); }
 });
 
+// 🌟 SYNC USER USAGE WEBHOOK FALLBACK (DUAL ROUTE) 🌟
+userApp.post('/api/internal/sync-user-usage', async (req, res) => {
+    try {
+        const { name, usedGB, totalGB, expireDate } = req.body;
+        if (!name) return res.status(400).json({ error: "Missing username" });
+        const user = await User.findOne({ name: name });
+        if (!user) return res.status(404).json({ error: "User not found locally" });
+
+        if (usedGB !== undefined) user.usedGB = Number(usedGB);
+        if (totalGB !== undefined) user.totalGB = Number(totalGB);
+        if (expireDate !== undefined) user.expireDate = expireDate;
+        
+        await user.save();
+        return res.json({ success: true, message: "Usage synced successfully" });
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
+});
+
 userApp.post('/api/internal/sync-new-server', async (req, res) => {
     try {
         const apiKey = req.headers['x-api-key'];
-        const { newServerName, userKeys } = req.body;
+        const { masterGroupId, newServerName, userKeys } = req.body;
         if (!newServerName || !userKeys) return res.status(400).json({ error: "Invalid payload data" });
 
-        const validGroup = await Group.findOne({ masterApiKey: apiKey });
-        if (!validGroup) return res.status(401).json({ error: "Unauthorized" });
+        const validGroup = await Group.findOne({ masterGroupId: masterGroupId, masterApiKey: apiKey });
+        if (!validGroup && apiKey !== process.env.PANELMASTER_API_KEY) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
 
         let successCount = 0;
         for (const [identifier, newConfig] of Object.entries(userKeys)) {
