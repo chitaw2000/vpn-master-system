@@ -7,68 +7,36 @@ const adminApp = express.Router();
 const Group = require('../models/Group');
 const User = require('../models/User');
 const Master = require('../models/Master');
-const Setting = require('../models/Setting'); // 🌟 NEW: Settings Model
-const { sendBackupDocument } = require('../utils/telegram'); // 🌟 NEW: Telegram Bot Logic
+const Setting = require('../models/Setting'); 
+const { generateFullBackupFile, getMMTString, backupDir } = require('../utils/backup'); // 🌟 NEW
+const { initTelegramBot, sendAutoBackupDocument } = require('../utils/telegram'); // 🌟 NEW
 const redisClient = require('../config/redis');
 
-// 🌟 Backup Directory Setup 🌟
-const backupDir = path.join(process.cwd(), 'backups');
-if (!fs.existsSync(backupDir)) {
-    fs.mkdirSync(backupDir, { recursive: true });
-}
-
-// 🌟 Myanmar Standard Time (MMT) Formatter 🌟
-function getMMTString() {
-    const d = new Date();
-    const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-    const mmt = new Date(utc + (3600000 * 6.5)); // UTC+6:30
-    const p = n => n.toString().padStart(2, '0');
-    return `${mmt.getFullYear()}-${p(mmt.getMonth()+1)}-${p(mmt.getDate())}_${p(mmt.getHours())}-${p(mmt.getMinutes())}-${p(mmt.getSeconds())}`;
-}
-
-// 🌟 Full Backup Generator Helper 🌟
-async function generateFullBackupFile() {
-    const groups = await Group.find({});
-    const masters = await Master.find({});
-    const users = await User.find({});
-    
-    const data = { type: 'full', date: new Date(), groups, masters, users };
-    const filename = `Full_Backup_${getMMTString()}.json`;
-    const filePath = path.join(backupDir, filename);
-    
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    return { filePath, filename };
-}
-
-// 🌟 Auto Backup Loop Manager 🌟
+// 🌟 Auto Backup Loop Manager (MINUTES) 🌟
 let backupIntervalId = null;
 async function startTelegramAutoBackup() {
     if (backupIntervalId) clearInterval(backupIntervalId);
     
     try {
         const setting = await Setting.findOne({});
-        if (!setting || !setting.botToken || !setting.adminId || !setting.backupIntervalHours) {
-            console.log("⚠️ Telegram Auto-Backup is disabled. Settings missing.");
+        if (!setting || !setting.botToken || !setting.adminId || !setting.backupIntervalMinutes) {
+            console.log("⚠️ Telegram Auto-Backup is disabled.");
             return;
         }
 
-        const intervalMs = setting.backupIntervalHours * 60 * 60 * 1000;
-        console.log(`✅ Telegram Auto-Backup started. Interval: ${setting.backupIntervalHours} hour(s).`);
+        // Initialize Bot Polling for Keyboard Buttons
+        initTelegramBot(setting.botToken, setting.adminId);
+
+        const intervalMs = setting.backupIntervalMinutes * 60 * 1000; // 🌟 Minutes to Milliseconds
+        console.log(`✅ Telegram Auto-Backup started. Interval: ${setting.backupIntervalMinutes} Minute(s).`);
 
         backupIntervalId = setInterval(async () => {
-            try {
-                console.log("⏳ Generating Auto Backup...");
-                const { filePath, filename } = await generateFullBackupFile();
-                await sendBackupDocument(setting.botToken, setting.adminId, filePath, `🕒 Auto System Backup\nFile: ${filename}`);
-                console.log("✅ Auto Backup sent to Telegram.");
-            } catch (err) {
-                console.log("❌ Auto Backup Failed:", err.message);
-            }
+            console.log("⏳ Generating Auto Backup...");
+            await sendAutoBackupDocument(setting.adminId);
         }, intervalMs);
     } catch (err) { console.log("Auto Backup Init Error:", err); }
 }
-// Start loop when server runs
-setTimeout(startTelegramAutoBackup, 5000);
+setTimeout(startTelegramAutoBackup, 3000);
 
 
 // 🌟 Exponential Backoff Retry Function
@@ -373,7 +341,7 @@ adminApp.get('/settings', async (req, res) => {
     }
 
     let setting = await Setting.findOne({});
-    if (!setting) setting = { botToken: '', adminId: '', backupIntervalHours: 1 };
+    if (!setting) setting = { botToken: '', adminId: '', backupIntervalMinutes: 60 };
 
     const renderBackupItem = (b, type) => {
         const dateMatch = b.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
@@ -442,8 +410,8 @@ adminApp.get('/settings', async (req, res) => {
                                 <input type="text" name="adminId" value="${setting.adminId}" placeholder="123456789" class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-blue-500 font-mono text-sm text-slate-700 transition">
                             </div>
                             <div>
-                                <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Interval (Hours)</label>
-                                <input type="number" name="backupIntervalHours" value="${setting.backupIntervalHours}" min="1" class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-blue-500 font-bold text-sm text-slate-700 transition">
+                                <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase tracking-widest">Interval (Minutes)</label>
+                                <input type="number" name="backupIntervalMinutes" value="${setting.backupIntervalMinutes}" min="1" placeholder="e.g. 60 for 1 hour" class="w-full border-2 border-slate-200 p-3.5 rounded-2xl outline-none focus:border-blue-500 font-bold text-sm text-slate-700 transition">
                             </div>
                             <div class="md:col-span-3 flex gap-3">
                                 <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(37,99,235,0.3)] active:scale-[0.98]">
@@ -457,6 +425,7 @@ adminApp.get('/settings', async (req, res) => {
                                     <i class="fas fa-paper-plane mr-2"></i> Send Full Backup to Telegram Now
                                 </button>
                             </form>
+                            <p class="text-center text-xs text-slate-500 mt-3">💡 **Tip:** Send <code>/start</code> to your bot to get the Manual Backup button inside Telegram app.</p>
                         </div>
                     </div>
 
@@ -504,9 +473,9 @@ adminApp.get('/settings', async (req, res) => {
 // 🌟 TELEGRAM ROUTES 🌟
 adminApp.post('/save-telegram-settings', async (req, res) => {
     try {
-        const { botToken, adminId, backupIntervalHours } = req.body;
+        const { botToken, adminId, backupIntervalMinutes } = req.body;
         await Setting.findOneAndUpdate({}, { 
-            botToken, adminId, backupIntervalHours: Number(backupIntervalHours) 
+            botToken, adminId, backupIntervalMinutes: Number(backupIntervalMinutes) 
         }, { upsert: true });
         
         startTelegramAutoBackup(); // Restart loop with new settings
