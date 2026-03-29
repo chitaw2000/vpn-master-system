@@ -1,3 +1,4 @@
+require('dotenv').config(); // 🌟 Load .env variables
 const express = require('express');
 const axios = require('axios');
 const userApp = express.Router();
@@ -5,9 +6,14 @@ const redisClient = require('../config/redis');
 const User = require('../models/User');
 const Group = require('../models/Group');
 
-// 🌟🌟 FIXED: Exponential Backoff with 401 Loop Stop 🌟🌟
+// 🌟🌟 FIXED: Auto Content-Type & 401 Loop Stop 🌟🌟
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
     const method = (config && config.method) ? config.method.toLowerCase() : 'post';
+    
+    if (!config) config = {};
+    if (!config.headers) config.headers = {};
+    config.headers['Content-Type'] = 'application/json'; // 🌟 MUST REQUIREMENT
+
     for (let i = 0; i < retries; i++) {
         try {
             if (method === 'get') return await axios.get(url, config);
@@ -31,7 +37,7 @@ userApp.get('/panel/api/ping/:token/:nodeName', async (req, res) => {
         const group = await Group.findOne({ name: user.groupName });
         if (!group || !group.masterIp) return res.json({ status: 'offline' });
 
-        const apiKeyHeader = group.masterApiKey || process.env.PANELMASTER_API_KEY;
+        const apiKeyHeader = process.env.PANELMASTER_API_KEY || group.masterApiKey; // 🌟 ENV PRIORITY 🌟
         const url = `${group.masterIp}/api/ping/${encodeURIComponent(nodeName)}`;
         const response = await axios.get(url, { headers: { 'x-api-key': apiKeyHeader }, timeout: 4000 });
         res.json(response.data);
@@ -292,7 +298,7 @@ userApp.post('/panel/change-server', async (req, res) => {
         const groupInfo = await Group.findOne({ name: user.groupName });
         if (!groupInfo) return res.status(404).send("Group Error");
 
-        const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
+        const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; // 🌟 ENV PRIORITY 🌟
 
         if (!user.accessKeys || !user.accessKeys[newServer]) {
             try {
@@ -339,7 +345,7 @@ userApp.get('/:token.json', async (req, res) => {
             try {
                 const groupInfo = await Group.findOne({ name: user.groupName });
                 if (groupInfo && groupInfo.masterIp) {
-                    const apiKeyHeader = groupInfo.masterApiKey || process.env.PANELMASTER_API_KEY;
+                    const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; // 🌟 ENV PRIORITY 🌟
                     axios.post(groupInfo.masterIp + '/api/internal/block-user', { username: user.name }, { headers: { 'x-api-key': apiKeyHeader }, timeout: 2000 }).catch(() => {});
                 }
             } catch (e) {}
@@ -397,7 +403,8 @@ userApp.post('/api/internal/sync-new-server', async (req, res) => {
         const { masterGroupId, newServerName, userKeys } = req.body;
         if (!newServerName || !userKeys) return res.status(400).json({ error: "Invalid payload data" });
 
-        const validGroup = await Group.findOne({ masterGroupId: masterGroupId, masterApiKey: apiKey });
+        const validGroup = await Group.findOne({ masterGroupId: masterGroupId });
+        // 🌟 Ensure it checks process.env if Group key doesn't match
         if (!validGroup && apiKey !== process.env.PANELMASTER_API_KEY) {
             return res.status(401).json({ error: "Unauthorized" });
         }
