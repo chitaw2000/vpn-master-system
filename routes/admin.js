@@ -1,4 +1,4 @@
-require('dotenv').config(); // 🌟 Load .env variables
+require('dotenv').config(); 
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
@@ -28,13 +28,12 @@ async function startTelegramAutoBackup() {
 }
 setTimeout(startTelegramAutoBackup, 3000);
 
-// 🌟🌟 FIXED: Auto Content-Type & 401 Loop Stop 🌟🌟
 async function fetchWithRetry(url, data, config, retries = 3, delay = 1000) {
     const method = (config && config.method) ? config.method.toLowerCase() : 'post';
     
     if (!config) config = {};
     if (!config.headers) config.headers = {};
-    config.headers['Content-Type'] = 'application/json'; // 🌟 MUST REQUIREMENT FROM MASTER
+    config.headers['Content-Type'] = 'application/json'; 
 
     for (let i = 0; i < retries; i++) {
         try {
@@ -175,9 +174,12 @@ adminApp.get('/', async (req, res) => {
             </style>
         </head>
         <body class="bg-[#f8fafc] font-sans pb-10 selection:bg-indigo-500 selection:text-white">
+            
             ${getNavbar()}
             ${getLoadingModal()}
+
             <div class="max-w-7xl mx-auto px-4">
+                
                 <div class="bg-white p-7 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 mb-10 animate-fade-in-up">
                     <div class="flex-1 border-r border-slate-100 pr-0 md:pr-6">
                         <label class="block text-lg font-black text-slate-800 mb-5 flex items-center"><i class="fas fa-key text-yellow-500 mr-2 text-xl drop-shadow"></i> Save Master API</label>
@@ -258,13 +260,16 @@ adminApp.get('/', async (req, res) => {
                     try {
                         const res = await fetch('/admin/api/fetch-master-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ masterIp: ip, masterApiKey: key }) });
                         const data = await res.json();
+                        
                         if(data.success) {
                             let options = '<option value="" disabled selected>Select from Master...</option>';
                             data.groups.forEach(g => { options += \`<option value="\${g.id}">\${g.name} (\${g.serverCount} Nodes)</option>\`; });
+                            
                             document.getElementById('masterGroupSelect').innerHTML = options; 
                             document.getElementById('masterGroupSelect').classList.remove('bg-slate-50');
                             document.getElementById('masterGroupSelect').classList.add('bg-white', 'border-indigo-300');
                             document.getElementById('formMasterIp').value = ip; document.getElementById('formMasterApiKey').value = key; document.getElementById('formMasterName').value = name;
+                            
                             btn.innerHTML = '<i class="fas fa-check mr-2"></i> Connected!'; btn.classList.replace('bg-indigo-600', 'bg-green-500'); 
                             setTimeout(() => { btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; btn.classList.replace('bg-green-500', 'bg-indigo-600'); }, 2000);
                         } else { alert("Failed: " + data.error); btn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Fetch Groups'; }
@@ -290,7 +295,7 @@ adminApp.get('/', async (req, res) => {
 });
 
 // ==========================================
-// 🌟 SETTINGS & BACKUP PAGE
+// 🌟 SETTINGS & BACKUP PAGE 🌟
 // ==========================================
 adminApp.get('/settings', async (req, res) => {
     let fullBackups = []; let groupBackups = [];
@@ -334,6 +339,10 @@ adminApp.get('/settings', async (req, res) => {
             <title>Settings & Backups - QITO Tech</title>
             <script src="https://cdn.tailwindcss.com"></script>
             <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+            <style>
+                @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+                .animate-fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
+            </style>
         </head>
         <body class="bg-[#f8fafc] font-sans pb-10">
             ${getNavbar("System <span class='text-indigo-400 font-light ml-1'>SETTINGS</span>")}
@@ -440,11 +449,10 @@ adminApp.post('/api/restore-upload', async (req, res) => {
     } catch(e) { res.json({success: false, error: e.message}); }
 });
 
-// 🌟 FETCH API (ENV PRIORITY)
 adminApp.post('/api/fetch-master-groups', async (req, res) => {
     try { 
         let { masterIp, masterApiKey } = req.body; masterIp = masterIp.replace(/\/$/, ""); 
-        const apiKeyHeader = process.env.PANELMASTER_API_KEY || masterApiKey; // 🌟 ENV PRIORITY
+        const apiKeyHeader = process.env.PANELMASTER_API_KEY || masterApiKey;
         try {
             const response = await fetchWithRetry(masterIp + '/api/active-groups', null, { method: 'get', headers: { 'x-api-key': apiKeyHeader }, timeout: 5000 });
             if (response.data && response.data.groups) return res.json({ success: true, groups: response.data.groups }); 
@@ -462,33 +470,57 @@ adminApp.post('/create-group', async (req, res) => {
         const { groupName, masterGroupId, nsRecord, masterIp, masterApiKey, masterName } = req.body;
         if (groupName && masterGroupId && nsRecord && masterIp && masterApiKey) { 
             let cleanIp = masterIp.replace(/\/$/, ""); await Group.create({ name: groupName, masterGroupId, nsRecord, masterIp: cleanIp, masterApiKey, masterName: masterName || "1" }); 
-        } res.redirect('/admin');
-    } catch (error) { res.status(500).send("Error"); }
+        }
+        res.redirect('/admin');
+    } catch (error) { res.status(500).send("Error creating group"); }
 });
+
 adminApp.post('/delete-group', async (req, res) => {
     try {
-        const groupInfo = await Group.findOne({ name: req.body.groupName }); const users = await User.find({ groupName: req.body.groupName });
+        const groupInfo = await Group.findOne({ name: req.body.groupName }); 
+        const users = await User.find({ groupName: req.body.groupName });
         if (groupInfo) { 
-            const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; // 🌟 ENV PRIORITY
+            const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey;
             for (const u of users) { try { await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: u.name, token: u.token }, { headers: { 'x-api-key': apiKeyHeader } }); } catch(e) {} } 
         }
         await Group.deleteOne({ name: req.body.groupName }); await User.deleteMany({ groupName: req.body.groupName }); res.redirect('/admin');
-    } catch (error) { res.status(500).send("Error"); }
+    } catch (error) { res.status(500).send("Error deleting group"); }
 });
+
+// 🌟 RE-LINK MASTER ROUTE (RESTORED) 🌟
+adminApp.post('/update-group-master', async (req, res) => {
+    try {
+        const { groupName, masterData } = req.body;
+        if(masterData) { 
+            const [ip, apiKey, name] = masterData.split('|'); 
+            await Group.updateOne({ name: groupName }, { masterIp: ip, masterApiKey: apiKey, masterName: name }); 
+        }
+        res.redirect('/admin/group/' + encodeURIComponent(groupName));
+    } catch (e) { res.status(500).send("Error updating connection"); }
+});
+
 
 // ==========================================
 // 2. INSIDE GROUP VIEW
 // ==========================================
 adminApp.get('/group/:name', async (req, res) => {
-    const groupName = req.params.name; const highlightToken = req.query.highlight; 
-    const groupInfo = await Group.findOne({ name: groupName }); const users = await User.find({ groupName: groupName }).sort({ userNo: 1 }); const masters = await Master.find({}); 
-    const domainName = (groupInfo && groupInfo.nsRecord) ? groupInfo.nsRecord : (process.env.VPS_IP || req.hostname); const panelHost = process.env.VPS_IP || req.hostname;
+    const groupName = req.params.name;
+    const highlightToken = req.query.highlight; 
+    
+    const groupInfo = await Group.findOne({ name: groupName });
+    const users = await User.find({ groupName: groupName }).sort({ userNo: 1 }); 
+    const masters = await Master.find({}); 
+    
+    const domainName = (groupInfo && groupInfo.nsRecord) ? groupInfo.nsRecord : (process.env.VPS_IP || req.hostname);
+    const panelHost = process.env.VPS_IP || req.hostname;
 
     let usersHtml = '';
     users.forEach((u) => {
         const ssconfLink = `ssconf://${domainName}/${u.token}.json#QitoVPN_${encodeURIComponent(u.name.replace(/\s+/g, ''))}`;
         const webPanelLink = `http://${panelHost}/panel/${u.token}`; 
-        const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0; const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
+        const serverCount = u.accessKeys ? Object.keys(u.accessKeys).length : 0;
+        const usagePercent = u.totalGB > 0 ? ((u.usedGB / u.totalGB) * 100).toFixed(1) : 0;
+        
         const isHighlighted = (u.token === highlightToken) ? 'bg-yellow-100 border-l-4 border-yellow-500 animate-pulse transition-colors shadow-inner' : 'hover:bg-indigo-50/50';
 
         usersHtml += `
@@ -519,21 +551,29 @@ adminApp.get('/group/:name', async (req, res) => {
             <title>Group Management</title>
             <script src="https://cdn.tailwindcss.com"></script>
             <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+            <style>
+                @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+                .animate-fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
+            </style>
         </head>
         <body class="bg-[#f8fafc] font-sans pb-10">
+            
             ${getNavbar()}
             ${getLoadingModal()}
-            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8 -mt-8 sticky top-[88px] z-30">
+
+            <nav class="bg-white border-b border-slate-200 shadow-sm p-4 mb-8 -mt-8 sticky top-[88px] z-30 animate-fade-in-up">
                 <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
                     <div class="flex items-center"><a href="/admin" class="text-slate-400 hover:text-indigo-600 mr-4 text-xl transition transform hover:-translate-x-1"><i class="fas fa-arrow-left"></i></a><span class="font-black text-2xl text-slate-800">${groupName}</span><span class="ml-3 text-[10px] font-black text-white bg-indigo-500 px-2 py-1 rounded shadow-sm uppercase tracking-widest">${groupInfo.masterName || 'API'}</span></div>
                     <div class="flex flex-wrap items-center gap-3">
+                        <div class="hidden md:block text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-xl border border-slate-200"><i class="fas fa-link text-indigo-400 mr-1"></i> ${groupInfo.masterIp || 'Not Linked'}</div>
                         <button type="button" onclick="triggerUpload('group', '${groupName}')" class="bg-slate-800 text-white hover:bg-black px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm flex items-center"><i class="fas fa-upload mr-2"></i> Upload Backup</button>
                         <form action="/admin/backup-group" method="POST" class="m-0"><input type="hidden" name="groupName" value="${groupName}"><button type="submit" class="bg-blue-100 text-blue-700 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm border border-blue-200 flex items-center"><i class="fas fa-download mr-2"></i> Download Backup</button></form>
                         <form action="/admin/sync-group-nodes" method="POST" class="m-0" onsubmit="this.querySelector('button').innerHTML='<i class=\\'fas fa-spinner fa-spin mr-2\\'></i> Syncing...';"><input type="hidden" name="groupName" value="${groupName}"><button type="submit" class="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 rounded-xl text-sm font-bold transition shadow-[0_4px_14px_rgba(79,70,229,0.3)] active:scale-95 flex items-center"><i class="fas fa-sync-alt mr-2"></i> Sync Nodes</button></form>
                     </div>
                 </div>
             </nav>
-            <div class="max-w-7xl mx-auto px-4">
+
+            <div class="max-w-7xl mx-auto px-4 animate-fade-in-up">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                     <div class="md:col-span-2 bg-white rounded-[2rem] shadow-sm border border-slate-200 p-8">
                         <label class="block text-lg font-black text-slate-800 mb-5"><i class="fas fa-user-plus text-green-500 mr-2 drop-shadow"></i> Generate New Key</label>
@@ -552,6 +592,7 @@ adminApp.get('/group/:name', async (req, res) => {
                         </form>
                     </div>
                 </div>
+
                 <div class="bg-white rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-left min-w-[800px]"><thead><tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-widest text-slate-400 font-black"><th class="p-5">ID</th><th class="p-5">User Info</th><th class="p-5">Current Node</th><th class="p-5">Expire Date</th><th class="p-5">Data Usage</th><th class="p-5 text-right">Actions</th></tr></thead><tbody>${usersHtml}</tbody></table></div></div>
             </div>
 
@@ -571,6 +612,7 @@ adminApp.get('/group/:name', async (req, res) => {
             </div>
 
             ${getUploadScript()}
+
             <script>
                 window.onload = () => { const urlParams = new URLSearchParams(window.location.search); const highlight = urlParams.get('highlight'); if (highlight) { const el = document.getElementById('user-' + highlight); if (el) setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 500); } };
                 function openEditModal(token, gb, expire) { document.getElementById('editOldToken').value = token; document.getElementById('editNewToken').value = token; document.getElementById('editTotalGB').value = gb; document.getElementById('editExpireDate').value = expire; const modal = document.getElementById('editModal'); const content = document.getElementById('editModalContent'); modal.classList.remove('hidden'); modal.classList.add('flex'); setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10); }
@@ -582,7 +624,6 @@ adminApp.get('/group/:name', async (req, res) => {
     `);
 });
 
-// 🌟 EDIT USER LOGIC (SYNC USED GB TO MASTER INSTANTLY) 🌟
 adminApp.post('/edit-user', async (req, res) => {
     try {
         const { groupName, oldToken, newToken, newTotalGB, newExpireDate } = req.body;
@@ -603,11 +644,11 @@ adminApp.post('/edit-user', async (req, res) => {
             try {
                 const groupInfo = await Group.findOne({ name: groupName });
                 if (groupInfo && groupInfo.masterIp) {
-                    const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; // 🌟 ENV PRIORITY 🌟
+                    const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey;
                     await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
                         username: user.name, 
                         totalGB: user.totalGB, 
-                        usedGB: user.usedGB, // 🌟 USED GB ALWAYS SYNCED 🌟
+                        usedGB: user.usedGB, 
                         expireDate: user.expireDate
                     }, { headers: { 'x-api-key': apiKeyHeader } });
                 }
@@ -617,14 +658,13 @@ adminApp.post('/edit-user', async (req, res) => {
     } catch (error) { res.status(500).send("Error updating user details"); }
 });
 
-// 🌟 SYNC NODES (FORCES USED GB TO MASTER) 🌟
 adminApp.post('/sync-group-nodes', async (req, res) => {
     try {
         const groupName = req.body.groupName;
         const groupInfo = await Group.findOne({ name: groupName });
         if (!groupInfo || !groupInfo.masterIp) return res.redirect('/admin');
 
-        const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; // 🌟 ENV PRIORITY 🌟
+        const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; 
         const users = await User.find({ groupName: groupName });
         const batchSize = 5;
         
@@ -650,7 +690,7 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
                             await fetchWithRetry(groupInfo.masterIp + '/api/internal/edit-user', {
                                 username: user.name, 
                                 totalGB: user.totalGB, 
-                                usedGB: user.usedGB, // 🌟 OVERWRITE MASTER WITH BACKUP USED GB 🌟
+                                usedGB: user.usedGB, 
                                 expireDate: user.expireDate
                             }, { headers: { 'x-api-key': apiKeyHeader }, timeout: 3000 });
                         } catch (e) {}
@@ -662,14 +702,13 @@ adminApp.post('/sync-group-nodes', async (req, res) => {
     } catch (error) { res.status(500).send("Error syncing nodes"); }
 });
 
-// 🌟 ADD USER LOGIC (ALPHANUMERIC 32-CHAR) 🌟
 adminApp.post('/add-user', async (req, res) => {
     try {
         const { groupName, name, totalGB, expireDate } = req.body;
         const groupInfo = await Group.findOne({ name: groupName });
         if(!groupInfo || !groupInfo.masterIp) return res.status(400).send("Invalid Group Setup");
 
-        const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; // 🌟 ENV PRIORITY 🌟
+        const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; 
         const lastUser = await User.findOne({ groupName: groupName }).sort({ userNo: -1 });
         const nextNo = (lastUser && lastUser.userNo) ? lastUser.userNo + 1 : 1;
 
@@ -699,7 +738,7 @@ adminApp.post('/delete-user', async (req, res) => {
         const groupInfo = await Group.findOne({ name: req.body.groupName });
         const user = await User.findOne({ token: token });
         if (groupInfo && user) {
-            const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; // 🌟 ENV PRIORITY 🌟
+            const apiKeyHeader = process.env.PANELMASTER_API_KEY || groupInfo.masterApiKey; 
             try { await fetchWithRetry(groupInfo.masterIp + '/api/internal/delete-user', { username: user.name, token: token }, { headers: { 'x-api-key': apiKeyHeader } }); } catch(e) {}
         }
         await User.deleteOne({ token: token });
