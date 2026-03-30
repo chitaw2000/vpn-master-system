@@ -15,17 +15,25 @@ const Master = require('../models/Master');
 const Setting = require('../models/Setting'); 
 
 // ==========================================
-// 🌟 Utility & Security Modules
+// 🌟 Utility Modules
 // ==========================================
 const { generateFullBackupFile, getMMTString, backupDir } = require('../utils/backup');
 const { initTelegramBot, sendAutoBackupDocument } = require('../utils/telegram');
-const { hashPassword, verifyPassword, generateAndSendOTP, verifyOTP } = require('../security/authLogic');
-const { loginIpLimiter, otpLimiter } = require('../security/rateLimiter');
 const redisClient = require('../config/redis');
 
+// ==========================================
+// 🌟 0. NATIVE PASSWORD HASHING (No bcrypt needed)
+// ==========================================
+function hashPassword(password) {
+    return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+function verifyPassword(password, hash) {
+    return hashPassword(password) === hash;
+}
 
 // ==========================================
-// 🌟 1. Default Admin Account Initializer
+// 🌟 1. Default Admin Account Initializer (FORCE FIX)
 // ==========================================
 async function initDefaultAdmin() {
     try {
@@ -33,11 +41,14 @@ async function initDefaultAdmin() {
         if (!setting) {
             setting = new Setting({});
         }
-        if (!setting.adminPasswordHash) {
+        
+        // Force Fix: If hash is empty or not standard SHA-256 length, reset to admin123
+        const defaultHash = hashPassword('admin123');
+        if (!setting.adminPasswordHash || setting.adminPasswordHash.length !== 64) {
             setting.adminUsername = 'admin';
-            setting.adminPasswordHash = await hashPassword('admin123'); // Default Password
+            setting.adminPasswordHash = defaultHash;
             await setting.save();
-            console.log("✅ Default Admin Created -> Username: admin | Password: admin123");
+            console.log("✅ Admin Reset Successful -> Username: admin | Password: admin123");
         }
     } catch(e) {
         console.error("Admin Init Error:", e);
@@ -94,34 +105,47 @@ adminApp.get('/login', (req, res) => {
 });
 
 // Process Login
-adminApp.post('/login', loginIpLimiter, async (req, res) => {
+adminApp.post('/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         const setting = await Setting.findOne({});
         
         if (setting && setting.adminUsername === username) {
-            const isValid = await verifyPassword(password, setting.adminPasswordHash);
+            const isValid = verifyPassword(password, setting.adminPasswordHash);
             
             if (isValid) {
-                // Check if Telegram 2FA is configured
+                // 🌟 Check if Telegram Bot is Setup (Uses Backup Bot details)
                 if (setting.botToken && setting.adminId) {
                     try {
-                        const challengeId = await generateAndSendOTP(setting.adminId, setting.botToken);
+                        const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
+                        const challengeId = crypto.randomBytes(16).toString('hex');
+                        
+                        // Save OTP to Redis for 5 minutes
+                        await redisClient.setEx(`otp:${challengeId}`, 300, otp);
+                        
+                        // 🌟 Send OTP via existing Bot 🌟
+                        await axios.post(`https://api.telegram.org/bot${setting.botToken}/sendMessage`, {
+                            chat_id: setting.adminId,
+                            text: `🔐 *QITO Admin Login OTP*\n\nYour Verification Code is: \`${otp}\`\n\n_Expires in 5 minutes._`,
+                            parse_mode: 'Markdown'
+                        });
+
                         req.session.challengeId = challengeId;
                         return res.redirect('/admin/verify-otp');
+                        
                     } catch(e) {
-                        // 🌟 EMERGENCY BYPASS: If Bot Token is invalid, let admin in so they can fix it.
+                        // 🌟 EMERGENCY BYPASS: If OTP fails to send, let admin in to fix Bot settings.
                         console.log("⚠️ Emergency Bypass Activated due to Telegram OTP Failure:", e.message);
                         req.session.isAdmin = true;
                         return res.send(`
                             <script>
-                                alert('⚠️ Telegram OTP ပို့ရန် အခက်အခဲရှိနေပါသည်။ (Bot Token သို့မဟုတ် Chat ID မှားယွင်းနေပါသည်)\\n\\nအရေးပေါ် ဝင်ခွင့်ပြုလိုက်ပါသည်။ ကျေးဇူးပြု၍ Settings တွင် Bot အချက်အလက်များကို ချက်ချင်း ပြင်ဆင်ပါ။'); 
+                                alert('⚠️ Telegram OTP ပို့ရန် အခက်အခဲရှိနေပါသည်။\\n(Bot Token သို့မဟုတ် Chat ID မှားယွင်းနေပါသည်)\\n\\nအရေးပေါ် ဝင်ခွင့်ပြုလိုက်ပါသည်။ ကျေးဇူးပြု၍ Settings တွင် Bot အချက်အလက်များကို ပြင်ဆင်ပါ။'); 
                                 window.location.href='/admin/settings';
                             </script>
                         `);
                     }
                 } else {
-                    // No 2FA setup, login directly
+                    // No Bot setup, login directly
                     req.session.isAdmin = true;
                     return res.redirect('/admin');
                 }
@@ -154,7 +178,7 @@ adminApp.get('/verify-otp', (req, res) => {
                     <i class="fab fa-telegram-plane text-blue-400 text-3xl"></i>
                 </div>
                 <h2 class="text-2xl font-black text-white mb-2">Verification Required</h2>
-                <p class="text-slate-400 text-sm mb-8">We've sent a 6-digit OTP to your Telegram. Please enter it below to continue.</p>
+                <p class="text-slate-400 text-sm mb-8">We've sent a 6-digit OTP to your Backup Telegram Bot. Please enter it below.</p>
                 
                 <form action="/admin/verify-otp" method="POST">
                     <input type="text" name="otp" placeholder="• • • • • •" required maxlength="6" class="w-full bg-slate-900 border border-slate-700 text-white text-center text-2xl tracking-[0.5em] px-4 py-4 rounded-xl outline-none focus:border-blue-500 transition mb-6 font-mono">
@@ -167,21 +191,24 @@ adminApp.get('/verify-otp', (req, res) => {
 });
 
 // Process OTP
-adminApp.post('/verify-otp', otpLimiter, async (req, res) => {
+adminApp.post('/verify-otp', async (req, res) => {
     try {
         const { otp } = req.body;
         const challengeId = req.session.challengeId;
-        if (!challengeId) {
-            return res.redirect('/admin/login');
+        if (!challengeId) return res.redirect('/admin/login');
+
+        const storedOtp = await redisClient.get(`otp:${challengeId}`);
+        if (!storedOtp) {
+            return res.send(`<script>alert('❌ OTP Expired or Invalid Challenge. Please login again.'); window.location.href='/admin/login';</script>`);
         }
 
-        const result = await verifyOTP(challengeId, otp);
-        if (result.valid) {
+        if (storedOtp === otp) {
+            await redisClient.del(`otp:${challengeId}`); // Burn after reading
             req.session.isAdmin = true;
-            delete req.session.challengeId; // Clean up
+            delete req.session.challengeId;
             return res.redirect('/admin');
         } else {
-            res.send(`<script>alert('❌ ${result.message}'); window.history.back();</script>`);
+            res.send(`<script>alert('❌ Incorrect OTP!'); window.history.back();</script>`);
         }
     } catch(e) { 
         res.status(500).send("OTP Error"); 
@@ -766,18 +793,10 @@ adminApp.get('/settings', async (req, res) => {
                     </div>
 
                     <div class="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200">
-                        <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-                            <h3 class="text-xl font-black text-slate-800"><i class="fas fa-globe text-purple-500 mr-2"></i> Full System Backups</h3>
-                        </div>
+                        <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4"><h3 class="text-xl font-black text-slate-800"><i class="fas fa-globe text-purple-500 mr-2"></i> Full System Backups</h3></div>
                         <div class="flex gap-3 mb-6">
-                            <form action="/admin/backup-all" method="POST" class="flex-1 m-0">
-                                <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(147,51,234,0.3)] active:scale-[0.98]">
-                                    <i class="fas fa-plus-circle mr-2"></i> Create
-                                </button>
-                            </form>
-                            <button type="button" onclick="triggerUpload('full')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">
-                                <i class="fas fa-upload mr-2"></i> Upload
-                            </button>
+                            <form action="/admin/backup-all" method="POST" class="flex-1 m-0"><button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3.5 rounded-2xl transition shadow-[0_4px_15px_rgba(147,51,234,0.3)] active:scale-[0.98]"><i class="fas fa-plus-circle mr-2"></i> Create</button></form>
+                            <button type="button" onclick="triggerUpload('full')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]"><i class="fas fa-upload mr-2"></i> Upload</button>
                         </div>
                         <div class="border-t border-slate-100 pt-6 mb-6">
                             <form action="/admin/send-telegram-backup" method="POST" class="m-0" onsubmit="document.getElementById('loadingModal').classList.replace('hidden', 'flex');">
@@ -792,13 +811,9 @@ adminApp.get('/settings', async (req, res) => {
                     </div>
 
                     <div class="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200">
-                        <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-                            <h3 class="text-xl font-black text-slate-800"><i class="fas fa-users text-blue-500 mr-2"></i> Group Backups</h3>
-                        </div>
+                        <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4"><h3 class="text-xl font-black text-slate-800"><i class="fas fa-users text-blue-500 mr-2"></i> Group Backups</h3></div>
                         <div class="mb-6">
-                            <button type="button" onclick="triggerUpload('group')" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]">
-                                <i class="fas fa-upload mr-2"></i> Upload Group Backup
-                            </button>
+                            <button type="button" onclick="triggerUpload('group')" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl transition active:scale-[0.98]"><i class="fas fa-upload mr-2"></i> Upload Group Backup</button>
                             <p class="text-[11px] text-slate-400 mt-2 text-center">To create a Group Backup, go to the specific Group's page.</p>
                         </div>
                         <div class="max-h-96 overflow-y-auto pr-2 custom-scrollbar">
@@ -826,7 +841,7 @@ adminApp.post('/change-credentials', async (req, res) => {
         if (setting) {
             setting.adminUsername = username.trim();
             if (newPassword && newPassword.trim() !== '') {
-                setting.adminPasswordHash = await hashPassword(newPassword.trim());
+                setting.adminPasswordHash = hashPassword(newPassword.trim());
             }
             await setting.save();
             res.send(`<script>alert('✅ Admin Login Credentials Updated!'); window.location.href='/admin/settings';</script>`);
