@@ -1,5 +1,6 @@
 const session = require('express-session');
-const RedisStore = require('connect-redis').default;
+// 🌟 ဤနေရာတွင် Version အသစ်အတွက် Import ပုံစံ ပြောင်းလိုက်ပါသည် 🌟
+const { RedisStore } = require('connect-redis'); 
 const csrf = require('csurf');
 const redisClient = require('../config/redis');
 
@@ -21,7 +22,7 @@ module.exports = function setupSessionAndCsrf(app) {
 
     // 2. Strict Origin/Referer Check Middleware for POST/PUT/DELETE
     app.use((req, res, next) => {
-        if (req.method !== 'GET' && !req.path.startsWith('/api/')) { // API has its own token auth
+        if (req.method !== 'GET' && !req.path.startsWith('/api/')) { 
             const origin = req.headers.origin;
             const host = req.headers.host;
             if (origin && !origin.includes(host)) {
@@ -35,7 +36,7 @@ module.exports = function setupSessionAndCsrf(app) {
     const csrfProtection = csrf({ cookie: false }); 
     app.use((req, res, next) => {
         if (req.path.startsWith('/api/')) {
-            next(); // Skip CSRF for API (Handled by API Key)
+            next(); // Skip CSRF for API
         } else {
             csrfProtection(req, res, next);
         }
