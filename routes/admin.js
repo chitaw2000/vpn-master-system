@@ -1,10 +1,21 @@
 require('dotenv').config(); 
 const express = require('express');
+const session = require('express-session'); // 🌟 FIXED: SESSION MODULE ADDED 🌟
 const crypto = require('crypto');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const adminApp = express.Router();
+
+// ==========================================
+// 🌟 Session Initialization (CRITICAL FIX)
+// ==========================================
+adminApp.use(session({
+    secret: process.env.SESSION_SECRET || 'qito-premium-vpn-secret-key-2026',
+    resave: false,
+    saveUninitialized: true,
+    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 1 Day Login Expiry
+}));
 
 // ==========================================
 // 🌟 Database Models
@@ -47,6 +58,7 @@ async function initDefaultAdmin() {
             setting.adminUsername = 'admin';
             setting.adminPasswordHash = defaultHash;
             await setting.save();
+            console.log("✅ Admin Reset Successful -> Username: admin | Password: admin123");
         }
     } catch(e) {
         console.error("Admin Init Error:", e);
@@ -120,7 +132,6 @@ adminApp.post('/login', async (req, res) => {
         }
 
         // 🌟🌟 THE ULTIMATE BYPASS & AUTO-FIX 🌟🌟
-        // အကယ်၍ DB ထဲမှာ Error တက်နေရင်တောင် admin / admin123 ရိုက်တာနဲ့ DB ကို အလိုလို ပြင်ပြီး ဝင်ခွင့်ပေးမည်
         if (username === 'admin' && password === 'admin123' && !isValid) {
             setting.adminUsername = 'admin';
             setting.adminPasswordHash = hashPassword('admin123');
@@ -133,7 +144,7 @@ adminApp.post('/login', async (req, res) => {
             // 🌟 Check if Telegram Bot is Setup
             if (setting.botToken && setting.adminId) {
                 try {
-                    const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
+                    const otp = Math.floor(100000 + Math.random() * 900000).toString(); 
                     const challengeId = crypto.randomBytes(16).toString('hex');
                     
                     await redisClient.setEx(`otp:${challengeId}`, 300, otp);
@@ -166,7 +177,7 @@ adminApp.post('/login', async (req, res) => {
             res.send(`<script>alert('❌ Invalid Username or Password!'); window.history.back();</script>`);
         }
     } catch(e) { 
-        res.status(500).send("Login Error"); 
+        res.status(500).send("Login Error: " + e.message); // 🌟 Added detail for debugging
     }
 });
 
@@ -224,7 +235,7 @@ adminApp.post('/verify-otp', async (req, res) => {
             res.send(`<script>alert('❌ Incorrect OTP!'); window.history.back();</script>`);
         }
     } catch(e) { 
-        res.status(500).send("OTP Error"); 
+        res.status(500).send("OTP Error: " + e.message); 
     }
 });
 
